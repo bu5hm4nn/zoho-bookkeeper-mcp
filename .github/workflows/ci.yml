@@ -40,7 +40,3 @@ jobs:
 
       - name: Run tests
         run: pnpm test
-
-      - name: Run tests with coverage
-        if: matrix.node-version == 22
-        run: pnpm test:coverage
