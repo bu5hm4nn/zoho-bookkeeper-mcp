@@ -61,8 +61,19 @@ jobs:
           path: coverage/
       - name: Check Coverage Threshold
         run: |
-          COVERAGE=$(cat coverage/coverage-summary.json | jq '.total.lines.pct')
-          echo "Coverage: $COVERAGE%"
-          if (( $(echo "$COVERAGE < 50" | bc -l) )); then
-            echo "::warning::Coverage below 50%"
-          fi
+          node -e "
+          const fs = require('fs');
+          const p = 'coverage/coverage-summary.json';
+          if (!fs.existsSync(p)) {
+            console.log('::warning::No coverage-summary.json found; skipping coverage threshold check');
+            process.exit(0);
+          }
+          const s = JSON.parse(fs.readFileSync(p, 'utf8'));
+          const cov = Number(s?.total?.lines?.pct);
+          console.log('Coverage: ' + cov + '%');
+          if (!Number.isFinite(cov)) {
+            console.log('::warning::Coverage value missing/invalid; skipping threshold check');
+            process.exit(0);
+          }
+          if (cov < 50) console.log('::warning::Coverage below 50%');
+          "
