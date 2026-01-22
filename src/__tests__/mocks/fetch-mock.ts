@@ -82,7 +82,10 @@ function createMockResponse(config: MockResponse) {
 }
 
 // Pre-configured response factories
-export function createSuccessResponse(body: unknown, headers?: Record<string, string>): MockResponse {
+export function createSuccessResponse(
+  body: unknown,
+  headers?: Record<string, string>
+): MockResponse {
   return {
     ok: true,
     status: 200,
@@ -124,9 +127,7 @@ export const mockResponses = {
 /**
  * Creates a fetch mock that handles OAuth token refresh
  */
-export function createZohoFetchMock(
-  apiResponses: Map<string, MockResponse> = new Map()
-): Mock {
+export function createZohoFetchMock(apiResponses: Map<string, MockResponse> = new Map()): Mock {
   const ZOHO_OAUTH_URL = "https://accounts.zoho.com/oauth/v2/token"
   const ZOHO_API_BASE = "https://www.zohoapis.com/books/v3"
 

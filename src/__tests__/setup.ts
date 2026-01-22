@@ -61,9 +61,7 @@ if (typeof globalThis.Headers === "undefined") {
         } else if (init instanceof Headers) {
           init.forEach((value, key) => this.headers.set(key, value))
         } else {
-          Object.entries(init).forEach(([key, value]) =>
-            this.headers.set(key.toLowerCase(), value)
-          )
+          Object.entries(init).forEach(([key, value]) => this.headers.set(key.toLowerCase(), value))
         }
       }
     }

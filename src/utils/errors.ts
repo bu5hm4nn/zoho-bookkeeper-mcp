@@ -5,32 +5,64 @@
 // Known Zoho error codes and their meanings
 const ZOHO_ERROR_CODES: Record<
   number,
-  { message: string; action: string; category: "auth" | "validation" | "not_found" | "rate_limit" | "server" }
+  {
+    message: string
+    action: string
+    category: "auth" | "validation" | "not_found" | "rate_limit" | "server"
+  }
 > = {
   0: { message: "Success", action: "No action needed", category: "validation" },
-  1: { message: "Internal error", action: "Try again later or contact support", category: "server" },
+  1: {
+    message: "Internal error",
+    action: "Try again later or contact support",
+    category: "server",
+  },
   2: { message: "Invalid URL", action: "Check the API endpoint URL", category: "validation" },
   4: {
     message: "Invalid value",
     action: "Check the parameter values match expected types",
     category: "validation",
   },
-  5: { message: "Invalid parameter", action: "Review required and optional parameters", category: "validation" },
+  5: {
+    message: "Invalid parameter",
+    action: "Review required and optional parameters",
+    category: "validation",
+  },
   9: {
     message: "Record not found",
     action: "Verify the ID exists - use list endpoints to find valid IDs",
     category: "not_found",
   },
-  10: { message: "Missing mandatory parameter", action: "Add the required parameter to your request", category: "validation" },
-  14: { message: "Authorization failed", action: "Check your access token and permissions", category: "auth" },
-  36: { message: "Rate limit exceeded", action: "Wait 1 minute before retrying", category: "rate_limit" },
-  57: { message: "OAuth token expired", action: "Token will be auto-refreshed on next request", category: "auth" },
+  10: {
+    message: "Missing mandatory parameter",
+    action: "Add the required parameter to your request",
+    category: "validation",
+  },
+  14: {
+    message: "Authorization failed",
+    action: "Check your access token and permissions",
+    category: "auth",
+  },
+  36: {
+    message: "Rate limit exceeded",
+    action: "Wait 1 minute before retrying",
+    category: "rate_limit",
+  },
+  57: {
+    message: "OAuth token expired",
+    action: "Token will be auto-refreshed on next request",
+    category: "auth",
+  },
   2006: {
     message: "Record not found",
     action: "The specified resource does not exist. Use list endpoints to find valid IDs.",
     category: "not_found",
   },
-  6000: { message: "Invalid OAuth token", action: "Token will be auto-refreshed on next request", category: "auth" },
+  6000: {
+    message: "Invalid OAuth token",
+    action: "Token will be auto-refreshed on next request",
+    category: "auth",
+  },
 }
 
 export interface ZohoApiError {

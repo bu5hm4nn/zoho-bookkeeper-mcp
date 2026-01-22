@@ -19,7 +19,8 @@ function resolveOrganizationId(organizationId?: string): { orgId: string } | { e
 
   if (!orgId) {
     return {
-      error: "Organization ID required. Set ZOHO_ORGANIZATION_ID environment variable or pass organization_id parameter.",
+      error:
+        "Organization ID required. Set ZOHO_ORGANIZATION_ID environment variable or pass organization_id parameter.",
     }
   }
 

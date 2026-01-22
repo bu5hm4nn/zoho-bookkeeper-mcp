@@ -18,11 +18,11 @@ export function registerContactTools(server: FastMCP): void {
 Supports filtering by contact type (customer or vendor).
 Use this to find contact_id values for bills, invoices, and expenses.`,
     parameters: z.object({
-      organization_id: z.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      contact_type: z
-        .enum(["customer", "vendor"])
+      organization_id: z
+        .string()
         .optional()
-        .describe("Filter by contact type"),
+        .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
+      contact_type: z.enum(["customer", "vendor"]).optional().describe("Filter by contact type"),
       status: z.enum(["active", "inactive", "crm", "all"]).optional().describe("Filter by status"),
       search_text: z.string().optional().describe("Search by name or company"),
       sort_column: z.enum(["contact_name", "company_name", "created_time"]).optional(),
@@ -80,7 +80,10 @@ Use this to find contact_id values for bills, invoices, and expenses.`,
     description: `Get detailed information about a specific contact.
 Returns full contact details including payment terms and currency settings.`,
     parameters: z.object({
-      organization_id: z.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
+      organization_id: z
+        .string()
+        .optional()
+        .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
       contact_id: z.string().describe("Contact ID"),
     }),
     annotations: {

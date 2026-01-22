@@ -56,7 +56,10 @@ Returns organization name, ID, currency, and timezone.`,
     description: `Get detailed information about a specific organization.
 Returns full organization details including address, contact info, and settings.`,
     parameters: z.object({
-      organization_id: z.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
+      organization_id: z
+        .string()
+        .optional()
+        .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
     }),
     annotations: {
       title: "Get Organization Details",

@@ -34,7 +34,10 @@ export function registerJournalTools(server: FastMCP): void {
 Returns journal entries with date, reference number, and total.
 Use date filters to narrow down results.`,
     parameters: z.object({
-      organization_id: z.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
+      organization_id: z
+        .string()
+        .optional()
+        .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
       date_start: z.string().optional().describe("Start date (YYYY-MM-DD)"),
       date_end: z.string().optional().describe("End date (YYYY-MM-DD)"),
       sort_column: z.enum(["journal_date", "total", "created_time"]).optional(),
@@ -89,7 +92,10 @@ Use date filters to narrow down results.`,
     description: `Get detailed information about a specific journal entry.
 Returns full journal details including all line items.`,
     parameters: z.object({
-      organization_id: z.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
+      organization_id: z
+        .string()
+        .optional()
+        .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
       journal_id: z.string().describe("Journal ID"),
     }),
     annotations: {
@@ -126,7 +132,8 @@ Returns full journal details including all line items.`,
 
       if (journal.line_items && journal.line_items.length > 0) {
         journal.line_items.forEach((item: JournalLineItem, i: number) => {
-          const amount = item.debit_or_credit === "debit" ? `Debit: ${item.amount}` : `Credit: ${item.amount}`
+          const amount =
+            item.debit_or_credit === "debit" ? `Debit: ${item.amount}` : `Credit: ${item.amount}`
           details += `\n${i + 1}. ${item.account_name || item.account_id} - ${amount}`
           if (item.description) details += `\n   Description: ${item.description}`
         })
@@ -143,7 +150,10 @@ Returns full journal details including all line items.`,
 Line items must balance (total debits = total credits).
 Use list_accounts to find valid account_id values.`,
     parameters: z.object({
-      organization_id: z.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
+      organization_id: z
+        .string()
+        .optional()
+        .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
       journal_date: z.string().describe("Journal date (YYYY-MM-DD)"),
       reference_number: z.string().optional().describe("Reference number for the journal"),
       notes: z.string().optional().describe("Notes or memo for the journal"),
@@ -186,7 +196,11 @@ Debits must equal credits for a valid journal entry.`
       if (args.reference_number) payload.reference_number = args.reference_number
       if (args.notes) payload.notes = args.notes
 
-      const result = await zohoPost<{ journal: Journal }>("/journals", args.organization_id, payload)
+      const result = await zohoPost<{ journal: Journal }>(
+        "/journals",
+        args.organization_id,
+        payload
+      )
 
       if (!result.ok) {
         return result.errorMessage || "Failed to create journal"
@@ -216,7 +230,10 @@ Use this journal_id to add attachments or update the journal.`
 Can update date, reference, notes, and line items.
 Line items must still balance after update.`,
     parameters: z.object({
-      organization_id: z.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
+      organization_id: z
+        .string()
+        .optional()
+        .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
       journal_id: z.string().describe("Journal ID to update"),
       journal_date: z.string().optional().describe("New journal date (YYYY-MM-DD)"),
       reference_number: z.string().optional().describe("New reference number"),
@@ -282,7 +299,10 @@ Journal ID: \`${args.journal_id}\``
     description: `Delete a journal entry.
 This action cannot be undone. The journal will be permanently removed.`,
     parameters: z.object({
-      organization_id: z.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
+      organization_id: z
+        .string()
+        .optional()
+        .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
       journal_id: z.string().describe("Journal ID to delete"),
     }),
     annotations: {
@@ -309,7 +329,10 @@ Journal ID \`${args.journal_id}\` has been deleted.`
     description: `Publish (mark as posted) a draft journal entry.
 Published journals are finalized and affect account balances.`,
     parameters: z.object({
-      organization_id: z.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
+      organization_id: z
+        .string()
+        .optional()
+        .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
       journal_id: z.string().describe("Journal ID to publish"),
     }),
     annotations: {
@@ -341,7 +364,10 @@ Journal ID \`${args.journal_id}\` has been marked as published.`
 Supported file types: PDF, PNG, JPG, JPEG, GIF, DOC, DOCX, XLS, XLSX.
 Use this to attach invoices, receipts, or supporting documents to journal entries.`,
     parameters: z.object({
-      organization_id: z.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
+      organization_id: z
+        .string()
+        .optional()
+        .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
       journal_id: z.string().describe("Journal ID to attach file to"),
       file_path: z.string().describe("Full local file path to the attachment"),
     }),
@@ -376,7 +402,10 @@ The attachment is now associated with this journal entry.`
     description: `Get attachment information for a journal entry.
 Returns details about any files attached to the journal.`,
     parameters: z.object({
-      organization_id: z.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
+      organization_id: z
+        .string()
+        .optional()
+        .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
       journal_id: z.string().describe("Journal ID"),
     }),
     annotations: {
@@ -426,7 +455,10 @@ Returns details about any files attached to the journal.`,
     description: `Delete attachment from a journal entry.
 Removes the file association from the journal.`,
     parameters: z.object({
-      organization_id: z.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
+      organization_id: z
+        .string()
+        .optional()
+        .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
       journal_id: z.string().describe("Journal ID"),
     }),
     annotations: {

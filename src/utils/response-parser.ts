@@ -84,10 +84,7 @@ export async function parseZohoResponse<T>(
  * Extract the main data from a Zoho response
  * Zoho responses typically have the data nested under a specific key
  */
-export function extractData<T>(
-  response: Record<string, unknown>,
-  key: string
-): T | undefined {
+export function extractData<T>(response: Record<string, unknown>, key: string): T | undefined {
   return response[key] as T | undefined
 }
 

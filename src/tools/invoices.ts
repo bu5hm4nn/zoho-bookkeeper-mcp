@@ -4,11 +4,7 @@
 
 import { z } from "zod"
 import type { FastMCP } from "fastmcp"
-import {
-  zohoGet,
-  zohoUploadAttachment,
-  zohoDeleteAttachment,
-} from "../api/client.js"
+import { zohoGet, zohoUploadAttachment, zohoDeleteAttachment } from "../api/client.js"
 import type { Invoice, Attachment } from "../api/types.js"
 
 /**
@@ -22,7 +18,10 @@ export function registerInvoiceTools(server: FastMCP): void {
 Supports filtering by date, customer, and status.
 Returns invoice details with customer, amount, and due date.`,
     parameters: z.object({
-      organization_id: z.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
+      organization_id: z
+        .string()
+        .optional()
+        .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
       date_start: z.string().optional().describe("Start date (YYYY-MM-DD)"),
       date_end: z.string().optional().describe("End date (YYYY-MM-DD)"),
       customer_id: z.string().optional().describe("Filter by customer"),
@@ -87,7 +86,10 @@ Returns invoice details with customer, amount, and due date.`,
     description: `Get detailed information about a specific invoice.
 Returns full invoice details including line items and customer info.`,
     parameters: z.object({
-      organization_id: z.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
+      organization_id: z
+        .string()
+        .optional()
+        .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
       invoice_id: z.string().describe("Invoice ID"),
     }),
     annotations: {
@@ -145,7 +147,10 @@ Returns full invoice details including line items and customer info.`,
 Supported file types: PDF, PNG, JPG, JPEG, GIF, DOC, DOCX, XLS, XLSX.
 Use this to attach supporting documents to invoices.`,
     parameters: z.object({
-      organization_id: z.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
+      organization_id: z
+        .string()
+        .optional()
+        .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
       invoice_id: z.string().describe("Invoice ID to attach file to"),
       file_path: z.string().describe("Full local file path to the attachment"),
     }),
@@ -178,7 +183,10 @@ Use this to attach supporting documents to invoices.`,
     description: `Get attachment information for an invoice.
 Returns details about any files attached to the invoice.`,
     parameters: z.object({
-      organization_id: z.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
+      organization_id: z
+        .string()
+        .optional()
+        .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
       invoice_id: z.string().describe("Invoice ID"),
     }),
     annotations: {
@@ -217,7 +225,10 @@ Returns details about any files attached to the invoice.`,
     description: `Delete attachment from an invoice.
 Removes the file association from the invoice.`,
     parameters: z.object({
-      organization_id: z.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
+      organization_id: z
+        .string()
+        .optional()
+        .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
       invoice_id: z.string().describe("Invoice ID"),
     }),
     annotations: {
