@@ -6,10 +6,7 @@ import { z } from "zod"
 import type { FastMCP } from "fastmcp"
 import { zohoGet } from "../api/client.js"
 import type { BankAccount, BankTransaction } from "../api/types.js"
-import { entityIdSchema } from "../utils/validation.js"
-
-// Date regex for validation
-const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/
+import { entityIdSchema, optionalDateSchema } from "../utils/validation.js"
 
 /**
  * Register bank account tools on the server
@@ -146,16 +143,8 @@ These are transactions imported/entered in Zoho, not live bank feeds.`,
         .optional()
         .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
       account_id: entityIdSchema.describe("Bank account ID"),
-      date_start: z
-        .string()
-        .regex(DATE_REGEX, "Date must be in YYYY-MM-DD format")
-        .optional()
-        .describe("Start date (YYYY-MM-DD)"),
-      date_end: z
-        .string()
-        .regex(DATE_REGEX, "Date must be in YYYY-MM-DD format")
-        .optional()
-        .describe("End date (YYYY-MM-DD)"),
+      date_start: optionalDateSchema.describe("Start date (YYYY-MM-DD)"),
+      date_end: optionalDateSchema.describe("End date (YYYY-MM-DD)"),
       status: z.enum(["All", "uncategorized", "categorized", "excluded"]).optional(),
       sort_column: z.enum(["date", "amount"]).optional(),
       page: z.number().int().positive().optional(),

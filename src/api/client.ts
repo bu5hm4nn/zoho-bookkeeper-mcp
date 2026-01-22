@@ -61,9 +61,11 @@ function validateFilePath(filePath: string): { valid: boolean; error?: string } 
  * Validate file size before reading
  * Security: Prevents OOM attacks from large files
  */
-function validateFileSize(filePath: string): { valid: boolean; error?: string; size?: number } {
+async function validateFileSize(
+  filePath: string
+): Promise<{ valid: boolean; error?: string; size?: number }> {
   try {
-    const stats = fs.statSync(filePath)
+    const stats = await fs.promises.stat(filePath)
     if (stats.size > MAX_FILE_SIZE_BYTES) {
       return {
         valid: false,
@@ -274,7 +276,7 @@ export async function zohoUploadAttachment(
   }
 
   // Security: Validate file size before reading (prevent OOM)
-  const sizeValidation = validateFileSize(filePath)
+  const sizeValidation = await validateFileSize(filePath)
   if (!sizeValidation.valid) {
     return {
       ok: false,

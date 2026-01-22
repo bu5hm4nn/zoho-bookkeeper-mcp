@@ -6,10 +6,7 @@ import { z } from "zod"
 import type { FastMCP } from "fastmcp"
 import { zohoGet, zohoPost, zohoUploadAttachment, zohoDeleteAttachment } from "../api/client.js"
 import type { Expense, Attachment } from "../api/types.js"
-import { moneySchema, entityIdSchema } from "../utils/validation.js"
-
-// Date regex for validation
-const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/
+import { moneySchema, entityIdSchema, dateSchema, optionalDateSchema } from "../utils/validation.js"
 
 /**
  * Register expense tools on the server
@@ -26,16 +23,8 @@ Returns expense details with account, amount, and vendor info.`,
         .string()
         .optional()
         .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      date_start: z
-        .string()
-        .regex(DATE_REGEX, "Date must be in YYYY-MM-DD format")
-        .optional()
-        .describe("Start date (YYYY-MM-DD)"),
-      date_end: z
-        .string()
-        .regex(DATE_REGEX, "Date must be in YYYY-MM-DD format")
-        .optional()
-        .describe("End date (YYYY-MM-DD)"),
+      date_start: optionalDateSchema.describe("Start date (YYYY-MM-DD)"),
+      date_end: optionalDateSchema.describe("End date (YYYY-MM-DD)"),
       status: z
         .enum(["unbilled", "invoiced", "reimbursed", "non-billable"])
         .optional()
@@ -157,10 +146,7 @@ Use list_accounts to find valid account IDs.`,
       paid_through_account_id: entityIdSchema.describe(
         "Payment account ID (bank/cash/credit card)"
       ),
-      date: z
-        .string()
-        .regex(DATE_REGEX, "Date must be in YYYY-MM-DD format")
-        .describe("Expense date (YYYY-MM-DD)"),
+      date: dateSchema.describe("Expense date (YYYY-MM-DD)"),
       amount: moneySchema.describe("Expense amount (max 999,999,999.99, 2 decimal places)"),
       description: z.string().max(500).optional().describe("Description of the expense"),
       reference_number: z.string().max(100).optional().describe("Reference number"),

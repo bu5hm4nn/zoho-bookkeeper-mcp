@@ -13,10 +13,7 @@ import {
   zohoDeleteAttachment,
 } from "../api/client.js"
 import type { Journal, JournalLineItem, Attachment } from "../api/types.js"
-import { moneySchema, entityIdSchema } from "../utils/validation.js"
-
-// Date regex for validation
-const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/
+import { moneySchema, entityIdSchema, dateSchema, optionalDateSchema } from "../utils/validation.js"
 
 // Zod schema for journal line items with security validation
 const lineItemSchema = z.object({
@@ -42,16 +39,8 @@ Use date filters to narrow down results.`,
         .string()
         .optional()
         .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      date_start: z
-        .string()
-        .regex(DATE_REGEX, "Date must be in YYYY-MM-DD format")
-        .optional()
-        .describe("Start date (YYYY-MM-DD)"),
-      date_end: z
-        .string()
-        .regex(DATE_REGEX, "Date must be in YYYY-MM-DD format")
-        .optional()
-        .describe("End date (YYYY-MM-DD)"),
+      date_start: optionalDateSchema.describe("Start date (YYYY-MM-DD)"),
+      date_end: optionalDateSchema.describe("End date (YYYY-MM-DD)"),
       sort_column: z.enum(["journal_date", "total", "created_time"]).optional(),
       page: z.number().int().positive().optional().describe("Page number"),
       per_page: z.number().int().min(1).max(200).optional().describe("Items per page (max 200)"),
@@ -166,10 +155,7 @@ Use list_accounts to find valid account_id values.`,
         .string()
         .optional()
         .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      journal_date: z
-        .string()
-        .regex(DATE_REGEX, "Date must be in YYYY-MM-DD format")
-        .describe("Journal date (YYYY-MM-DD)"),
+      journal_date: dateSchema.describe("Journal date (YYYY-MM-DD)"),
       reference_number: z.string().max(100).optional().describe("Reference number for the journal"),
       notes: z.string().max(2000).optional().describe("Notes or memo for the journal"),
       line_items: z
@@ -250,11 +236,7 @@ Line items must still balance after update.`,
         .optional()
         .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
       journal_id: entityIdSchema.describe("Journal ID to update"),
-      journal_date: z
-        .string()
-        .regex(DATE_REGEX, "Date must be in YYYY-MM-DD format")
-        .optional()
-        .describe("New journal date (YYYY-MM-DD)"),
+      journal_date: optionalDateSchema.describe("New journal date (YYYY-MM-DD)"),
       reference_number: z.string().max(100).optional().describe("New reference number"),
       notes: z.string().max(2000).optional().describe("New notes"),
       line_items: z
