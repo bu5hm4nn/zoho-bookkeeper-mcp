@@ -6,6 +6,10 @@ import { z } from "zod"
 import type { FastMCP } from "fastmcp"
 import { zohoGet } from "../api/client.js"
 import type { BankAccount, BankTransaction } from "../api/types.js"
+import { entityIdSchema } from "../utils/validation.js"
+
+// Date regex for validation
+const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/
 
 /**
  * Register bank account tools on the server
@@ -58,10 +62,15 @@ These are the accounts linked in Zoho Books, not live bank data.`,
         .map((acc, index) => {
           const balance =
             acc.balance !== undefined ? ` | Balance: ${acc.currency_code || ""} ${acc.balance}` : ""
+          // Security: Safe masking with null check and minimum length validation
+          const maskedAccount =
+            acc.account_number && acc.account_number.length >= 4
+              ? `****${acc.account_number.slice(-4)}`
+              : "N/A"
           return `${index + 1}. **${acc.account_name}** (${acc.account_type})
    - Account ID: \`${acc.account_id}\`
    - Bank: ${acc.bank_name || "N/A"}
-   - Account Number: ${acc.account_number ? `****${acc.account_number.slice(-4)}` : "N/A"}
+   - Account Number: ${maskedAccount}
    - Active: ${acc.is_active ? "Yes" : "No"}${balance}`
         })
         .join("\n\n")
@@ -80,7 +89,7 @@ Returns full bank account details including routing number and balance.`,
         .string()
         .optional()
         .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      account_id: z.string().describe("Bank account ID"),
+      account_id: entityIdSchema.describe("Bank account ID"),
     }),
     annotations: {
       title: "Get Bank Account Details",
@@ -103,6 +112,16 @@ Returns full bank account details including routing number and balance.`,
         return "Bank account not found"
       }
 
+      // Security: Safe masking with null check and minimum length validation
+      const maskedAccount =
+        account.account_number && account.account_number.length >= 4
+          ? `****${account.account_number.slice(-4)}`
+          : "N/A"
+      const maskedRouting =
+        account.routing_number && account.routing_number.length >= 4
+          ? `****${account.routing_number.slice(-4)}`
+          : "N/A"
+
       return `**Bank Account Details**
 
 - **Account ID**: \`${account.account_id}\`
@@ -110,8 +129,8 @@ Returns full bank account details including routing number and balance.`,
 - **Type**: ${account.account_type}
 - **Code**: ${account.account_code || "N/A"}
 - **Bank Name**: ${account.bank_name || "N/A"}
-- **Account Number**: ${account.account_number ? `****${account.account_number.slice(-4)}` : "N/A"}
-- **Routing Number**: ${account.routing_number ? `****${account.routing_number.slice(-4)}` : "N/A"}
+- **Account Number**: ${maskedAccount}
+- **Routing Number**: ${maskedRouting}
 - **Currency**: ${account.currency_code || "N/A"}
 - **Balance**: ${account.currency_code || ""} ${account.balance || 0}
 - **Active**: ${account.is_active ? "Yes" : "No"}`
@@ -129,9 +148,17 @@ These are transactions imported/entered in Zoho, not live bank feeds.`,
         .string()
         .optional()
         .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      account_id: z.string().describe("Bank account ID"),
-      date_start: z.string().optional().describe("Start date (YYYY-MM-DD)"),
-      date_end: z.string().optional().describe("End date (YYYY-MM-DD)"),
+      account_id: entityIdSchema.describe("Bank account ID"),
+      date_start: z
+        .string()
+        .regex(DATE_REGEX, "Date must be in YYYY-MM-DD format")
+        .optional()
+        .describe("Start date (YYYY-MM-DD)"),
+      date_end: z
+        .string()
+        .regex(DATE_REGEX, "Date must be in YYYY-MM-DD format")
+        .optional()
+        .describe("End date (YYYY-MM-DD)"),
       status: z.enum(["All", "uncategorized", "categorized", "excluded"]).optional(),
       sort_column: z.enum(["date", "amount"]).optional(),
       page: z.number().int().positive().optional(),

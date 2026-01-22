@@ -5,9 +5,81 @@
 import * as fs from "fs"
 import * as path from "path"
 import { getAccessToken, ZohoAuthError } from "../auth/oauth.js"
-import { getZohoConfig } from "../config.js"
+import { getZohoConfig, MAX_FILE_SIZE_BYTES, REQUEST_TIMEOUT_MS } from "../config.js"
 import { getMimeType, validateAttachment } from "../utils/mime-types.js"
 import { parseZohoResponse, type ParsedResponse } from "../utils/response-parser.js"
+
+// Security: Allowed base directories for file uploads
+// Files can only be uploaded from these directories or their subdirectories
+const ALLOWED_UPLOAD_DIRECTORIES = [
+  "/app/documents", // Docker container path
+  "/tmp", // Temporary files
+  process.env.HOME ? path.join(process.env.HOME, "Documents") : "/home/Documents", // User documents
+]
+
+/**
+ * Validate that a file path is within allowed directories (prevent path traversal)
+ * Security: Prevents reading arbitrary files like /etc/passwd
+ */
+function validateFilePath(filePath: string): { valid: boolean; error?: string } {
+  const resolvedPath = path.resolve(filePath)
+  const normalizedPath = path.normalize(resolvedPath)
+
+  // Check for path traversal attempts
+  if (normalizedPath !== resolvedPath) {
+    return { valid: false, error: "Invalid file path: path traversal detected" }
+  }
+
+  // Check if path is within allowed directories
+  const isAllowed = ALLOWED_UPLOAD_DIRECTORIES.some((allowedDir) => {
+    const resolvedAllowedDir = path.resolve(allowedDir)
+    return (
+      normalizedPath.startsWith(resolvedAllowedDir + path.sep) ||
+      normalizedPath === resolvedAllowedDir
+    )
+  })
+
+  if (!isAllowed) {
+    return {
+      valid: false,
+      error: `File path not in allowed directories. Allowed: ${ALLOWED_UPLOAD_DIRECTORIES.join(", ")}`,
+    }
+  }
+
+  return { valid: true }
+}
+
+/**
+ * Validate file size before reading
+ * Security: Prevents OOM attacks from large files
+ */
+function validateFileSize(filePath: string): { valid: boolean; error?: string; size?: number } {
+  try {
+    const stats = fs.statSync(filePath)
+    if (stats.size > MAX_FILE_SIZE_BYTES) {
+      return {
+        valid: false,
+        error: `File too large: ${(stats.size / 1024 / 1024).toFixed(2)}MB (max ${MAX_FILE_SIZE_BYTES / 1024 / 1024}MB)`,
+      }
+    }
+    return { valid: true, size: stats.size }
+  } catch {
+    return { valid: false, error: "Unable to read file size" }
+  }
+}
+
+/**
+ * Create an AbortController with timeout
+ * Security: Prevents hanging requests
+ */
+function createTimeoutController(timeoutMs: number = REQUEST_TIMEOUT_MS): {
+  controller: AbortController
+  timeoutId: ReturnType<typeof setTimeout>
+} {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  return { controller, timeoutId }
+}
 
 /**
  * Resolve organization ID from parameter or environment config
@@ -75,12 +147,16 @@ export async function zohoRequest<T>(
     })
   }
 
+  // Security: Add request timeout
+  const { controller, timeoutId } = createTimeoutController()
+
   const options: RequestInit = {
     method,
     headers: {
       Authorization: `Zoho-oauthtoken ${token}`,
       "Content-Type": "application/json",
     },
+    signal: controller.signal,
   }
 
   if (body && method !== "GET" && method !== "HEAD") {
@@ -90,8 +166,16 @@ export async function zohoRequest<T>(
 
   try {
     const response = await fetch(url.toString(), options)
+    clearTimeout(timeoutId)
     return parseZohoResponse<T>(response, endpoint)
   } catch (error) {
+    clearTimeout(timeoutId)
+    if (error instanceof Error && error.name === "AbortError") {
+      return {
+        ok: false,
+        errorMessage: `Request timeout after ${REQUEST_TIMEOUT_MS / 1000} seconds`,
+      }
+    }
     return {
       ok: false,
       errorMessage: `Request failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -164,7 +248,33 @@ export async function zohoUploadAttachment(
 
   let token: string
 
-  // Validate the attachment file
+  // Security: Validate file path is within allowed directories (prevent path traversal)
+  const pathValidation = validateFilePath(filePath)
+  if (!pathValidation.valid) {
+    return {
+      ok: false,
+      errorMessage: pathValidation.error,
+    }
+  }
+
+  // Check if file exists
+  if (!fs.existsSync(filePath)) {
+    return {
+      ok: false,
+      errorMessage: `File not found: ${filePath}`,
+    }
+  }
+
+  // Security: Validate file size before reading (prevent OOM)
+  const sizeValidation = validateFileSize(filePath)
+  if (!sizeValidation.valid) {
+    return {
+      ok: false,
+      errorMessage: sizeValidation.error,
+    }
+  }
+
+  // Validate the attachment file type
   const validation = validateAttachment(filePath)
   if (!validation.valid) {
     return {
@@ -188,14 +298,6 @@ export async function zohoUploadAttachment(
     }
   }
 
-  // Check if file exists
-  if (!fs.existsSync(filePath)) {
-    return {
-      ok: false,
-      errorMessage: `File not found: ${filePath}`,
-    }
-  }
-
   // Build URL
   const url = new URL(`${config.apiUrl}${endpoint}`)
   url.searchParams.set("organization_id", orgIdResult.orgId)
@@ -209,6 +311,9 @@ export async function zohoUploadAttachment(
   const blob = new Blob([fileBuffer], { type: mimeType })
   formData.append("attachment", blob, fileName)
 
+  // Security: Add request timeout
+  const { controller, timeoutId } = createTimeoutController()
+
   try {
     const response = await fetch(url.toString(), {
       method: "POST",
@@ -217,10 +322,19 @@ export async function zohoUploadAttachment(
         // DO NOT set Content-Type header - let fetch set it with the correct multipart boundary
       },
       body: formData,
+      signal: controller.signal,
     })
 
+    clearTimeout(timeoutId)
     return parseZohoResponse<Record<string, unknown>>(response, endpoint)
   } catch (error) {
+    clearTimeout(timeoutId)
+    if (error instanceof Error && error.name === "AbortError") {
+      return {
+        ok: false,
+        errorMessage: `Upload timeout after ${REQUEST_TIMEOUT_MS / 1000} seconds`,
+      }
+    }
     return {
       ok: false,
       errorMessage: `Upload failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -270,6 +384,9 @@ export async function zohoListOrganizations(): Promise<ParsedResponse<Record<str
     }
   }
 
+  // Security: Add request timeout
+  const { controller, timeoutId } = createTimeoutController()
+
   try {
     const response = await fetch(`${config.apiUrl}/organizations`, {
       method: "GET",
@@ -277,10 +394,19 @@ export async function zohoListOrganizations(): Promise<ParsedResponse<Record<str
         Authorization: `Zoho-oauthtoken ${token}`,
         "Content-Type": "application/json",
       },
+      signal: controller.signal,
     })
 
+    clearTimeout(timeoutId)
     return parseZohoResponse<Record<string, unknown>>(response, "/organizations")
   } catch (error) {
+    clearTimeout(timeoutId)
+    if (error instanceof Error && error.name === "AbortError") {
+      return {
+        ok: false,
+        errorMessage: `Request timeout after ${REQUEST_TIMEOUT_MS / 1000} seconds`,
+      }
+    }
     return {
       ok: false,
       errorMessage: `Request failed: ${error instanceof Error ? error.message : String(error)}`,
