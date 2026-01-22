@@ -21,10 +21,13 @@ export default [
         fetch: "readonly",
         FormData: "readonly",
         Blob: "readonly",
+        File: "readonly",
         URL: "readonly",
         URLSearchParams: "readonly",
         Response: "readonly",
         Headers: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
       },
     },
     plugins: {
@@ -38,6 +41,8 @@ export default [
       "@typescript-eslint/no-explicit-any": "warn",
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
       "no-unused-vars": "off",
+      // Disable no-undef for TypeScript - TS handles this and understands types
+      "no-undef": "off",
     },
   },
   {
