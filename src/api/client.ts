@@ -20,29 +20,37 @@ const ALLOWED_UPLOAD_DIRECTORIES = [
 /**
  * Validate that a file path is within allowed directories (prevent path traversal)
  * Security: Prevents reading arbitrary files like /etc/passwd
+ * Security: Uses realpath to resolve symlinks and prevent symlink-based attacks
  */
 function validateFilePath(filePath: string): { valid: boolean; error?: string } {
-  const resolvedPath = path.resolve(filePath)
-  const normalizedPath = path.normalize(resolvedPath)
-
-  // Check for path traversal attempts
-  if (normalizedPath !== resolvedPath) {
-    return { valid: false, error: "Invalid file path: path traversal detected" }
+  let realPath: string
+  try {
+    // Security: Resolve symlinks to get the canonical path
+    // This prevents symlink attacks where a symlink in an allowed directory points to /etc/passwd
+    realPath = fs.realpathSync(filePath)
+  } catch {
+    // File doesn't exist or can't be accessed - will be caught by existsSync check later
+    // For now, fall back to resolved path for the directory check
+    realPath = path.resolve(filePath)
   }
 
-  // Check if path is within allowed directories
+  // Check if real path is within allowed directories
   const isAllowed = ALLOWED_UPLOAD_DIRECTORIES.some((allowedDir) => {
-    const resolvedAllowedDir = path.resolve(allowedDir)
-    return (
-      normalizedPath.startsWith(resolvedAllowedDir + path.sep) ||
-      normalizedPath === resolvedAllowedDir
-    )
+    try {
+      // Also resolve symlinks in allowed directories for consistent comparison
+      const allowedReal = fs.realpathSync(allowedDir)
+      return realPath === allowedReal || realPath.startsWith(allowedReal + path.sep)
+    } catch {
+      // Allowed directory doesn't exist, skip it
+      return false
+    }
   })
 
   if (!isAllowed) {
+    // Security: Don't expose allowed directories in error message
     return {
       valid: false,
-      error: `File path not in allowed directories. Allowed: ${ALLOWED_UPLOAD_DIRECTORIES.join(", ")}`,
+      error: "File path not in allowed upload directories",
     }
   }
 

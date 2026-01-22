@@ -62,11 +62,10 @@ These are the accounts linked in Zoho Books, not live bank data.`,
         .map((acc, index) => {
           const balance =
             acc.balance !== undefined ? ` | Balance: ${acc.currency_code || ""} ${acc.balance}` : ""
-          // Security: Safe masking with null check and minimum length validation
+          // Security: Sanitize account number (remove non-digits) before masking
+          const digitsOnly = acc.account_number?.replace(/\D/g, "")
           const maskedAccount =
-            acc.account_number && acc.account_number.length >= 4
-              ? `****${acc.account_number.slice(-4)}`
-              : "N/A"
+            digitsOnly && digitsOnly.length >= 4 ? `****${digitsOnly.slice(-4)}` : "N/A"
           return `${index + 1}. **${acc.account_name}** (${acc.account_type})
    - Account ID: \`${acc.account_id}\`
    - Bank: ${acc.bank_name || "N/A"}
@@ -112,15 +111,13 @@ Returns full bank account details including routing number and balance.`,
         return "Bank account not found"
       }
 
-      // Security: Safe masking with null check and minimum length validation
+      // Security: Sanitize account/routing numbers (remove non-digits) before masking
+      const accountDigits = account.account_number?.replace(/\D/g, "")
       const maskedAccount =
-        account.account_number && account.account_number.length >= 4
-          ? `****${account.account_number.slice(-4)}`
-          : "N/A"
+        accountDigits && accountDigits.length >= 4 ? `****${accountDigits.slice(-4)}` : "N/A"
+      const routingDigits = account.routing_number?.replace(/\D/g, "")
       const maskedRouting =
-        account.routing_number && account.routing_number.length >= 4
-          ? `****${account.routing_number.slice(-4)}`
-          : "N/A"
+        routingDigits && routingDigits.length >= 4 ? `****${routingDigits.slice(-4)}` : "N/A"
 
       return `**Bank Account Details**
 

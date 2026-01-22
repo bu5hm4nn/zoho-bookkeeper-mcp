@@ -114,8 +114,14 @@ const VALID_RESPONSE_KEYS = new Set([
  */
 export function extractData<T>(response: Record<string, unknown>, key: string): T | undefined {
   if (!VALID_RESPONSE_KEYS.has(key)) {
-    // Log warning for debugging but don't expose in response
-    console.warn(`Attempted to access non-whitelisted response key: ${key}`)
+    // Security: Only log in debug mode to prevent log spam/injection attacks
+    if (process.env.DEBUG === "true") {
+      // Sanitize key to prevent log injection (remove newlines, limit length)
+      const sanitizedKey = String(key)
+        .replace(/[\r\n]/g, "")
+        .slice(0, 50)
+      console.warn(`Attempted to access non-whitelisted response key: ${sanitizedKey}`)
+    }
     return undefined
   }
   return response[key] as T | undefined

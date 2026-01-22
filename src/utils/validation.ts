@@ -17,8 +17,18 @@ export const dateSchema = z
   .regex(DATE_REGEX, "Date must be in YYYY-MM-DD format")
   .refine(
     (date) => {
-      const parsed = new Date(date)
-      return !isNaN(parsed.getTime())
+      // Security: Validate that the date is a real calendar date
+      // Prevents impossible dates like 2024-02-31 which Date() silently rolls over to March
+      const [yStr, mStr, dStr] = date.split("-")
+      const y = Number(yStr)
+      const m = Number(mStr)
+      const d = Number(dStr)
+
+      if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return false
+
+      // Construct in UTC and ensure it round-trips exactly (prevents date rollover)
+      const dt = new Date(Date.UTC(y, m - 1, d))
+      return dt.toISOString().slice(0, 10) === date
     },
     { message: "Invalid date value" }
   )
@@ -80,10 +90,21 @@ export const entityIdSchema = z
   .max(50, "ID too long")
 
 /**
- * Validate a date string format
+ * Validate a date string format and that it's a real calendar date
  */
 export function isValidDateFormat(date: string): boolean {
-  return DATE_REGEX.test(date) && !isNaN(new Date(date).getTime())
+  if (!DATE_REGEX.test(date)) return false
+
+  const [yStr, mStr, dStr] = date.split("-")
+  const y = Number(yStr)
+  const m = Number(mStr)
+  const d = Number(dStr)
+
+  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return false
+
+  // Ensure the date round-trips (prevents impossible dates like 2024-02-31)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  return dt.toISOString().slice(0, 10) === date
 }
 
 /**
