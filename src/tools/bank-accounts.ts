@@ -6,7 +6,11 @@ import { z } from "zod"
 import type { FastMCP } from "fastmcp"
 import { zohoGet } from "../api/client.js"
 import type { BankAccount, BankTransaction } from "../api/types.js"
-import { entityIdSchema, optionalDateSchema } from "../utils/validation.js"
+import {
+  entityIdSchema,
+  optionalDateSchema,
+  optionalOrganizationIdSchema,
+} from "../utils/validation.js"
 
 /**
  * Register bank account tools on the server
@@ -19,10 +23,9 @@ export function registerBankAccountTools(server: FastMCP): void {
 Returns bank account details with name, type, and balance.
 These are the accounts linked in Zoho Books, not live bank data.`,
     parameters: z.object({
-      organization_id: z
-        .string()
-        .optional()
-        .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
       filter_by: z
         .enum(["Status.All", "Status.Active", "Status.Inactive"])
         .optional()
@@ -81,10 +84,9 @@ These are the accounts linked in Zoho Books, not live bank data.`,
     description: `Get detailed information about a specific bank account.
 Returns full bank account details including routing number and balance.`,
     parameters: z.object({
-      organization_id: z
-        .string()
-        .optional()
-        .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
       account_id: entityIdSchema.describe("Bank account ID"),
     }),
     annotations: {
@@ -138,10 +140,9 @@ Returns full bank account details including routing number and balance.`,
 Returns transactions recorded in Zoho Books for bank reconciliation.
 These are transactions imported/entered in Zoho, not live bank feeds.`,
     parameters: z.object({
-      organization_id: z
-        .string()
-        .optional()
-        .describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
       account_id: entityIdSchema.describe("Bank account ID"),
       date_start: optionalDateSchema.describe("Start date (YYYY-MM-DD)"),
       date_end: optionalDateSchema.describe("End date (YYYY-MM-DD)"),
