@@ -19,10 +19,33 @@ const ALLOWED_UPLOAD_DIRECTORIES = [
 ].filter((d): d is string => Boolean(d))
 
 /**
+ * Normalize path for cross-platform comparison
+ * Security: Handles case-insensitive filesystems (Windows, macOS with default settings)
+ */
+function normalizeForCompare(p: string): string {
+  const normalized = path.normalize(p)
+  // Windows and macOS (default) have case-insensitive filesystems
+  return process.platform === "win32" || process.platform === "darwin"
+    ? normalized.toLowerCase()
+    : normalized
+}
+
+/**
+ * Sanitize filename for multipart upload
+ * Security: Prevents header injection via CR/LF and path traversal via separators
+ */
+function sanitizeFilename(filename: string): string {
+  return filename
+    .replace(/[\r\n]/g, "") // Strip CR/LF to prevent header injection
+    .replace(/[/\\]/g, "_") // Replace path separators to prevent traversal
+}
+
+/**
  * Validate that a file path is within allowed directories (prevent path traversal)
  * Security: Prevents reading arbitrary files like /etc/passwd
  * Security: Uses realpath to resolve symlinks and prevent symlink-based attacks
  * Security: Returns resolvedPath to prevent TOCTOU attacks
+ * Security: Uses normalized paths for case-insensitive filesystem comparison
  */
 function validateFilePath(filePath: string): {
   valid: boolean
@@ -41,7 +64,9 @@ function validateFilePath(filePath: string): {
     realPath = resolvedInput
   }
 
-  // Check if real path is within allowed directories
+  // Check if real path is within allowed directories (using normalized comparison)
+  const normalizedRealPath = normalizeForCompare(realPath)
+
   const isAllowed = ALLOWED_UPLOAD_DIRECTORIES.some((allowedDir) => {
     const resolvedAllowed = path.resolve(allowedDir)
 
@@ -55,7 +80,11 @@ function validateFilePath(filePath: string): {
       allowedReal = resolvedAllowed
     }
 
-    return realPath === allowedReal || realPath.startsWith(allowedReal + path.sep)
+    const normalizedAllowed = normalizeForCompare(allowedReal)
+    return (
+      normalizedRealPath === normalizedAllowed ||
+      normalizedRealPath.startsWith(normalizedAllowed + path.sep)
+    )
   })
 
   if (!isAllowed) {
@@ -75,6 +104,7 @@ function validateFilePath(filePath: string): {
 function createTimeoutController(timeoutMs: number = REQUEST_TIMEOUT_MS): {
   controller: AbortController
   timeoutId: ReturnType<typeof setTimeout>
+  timeoutMs: number
 } {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
@@ -84,7 +114,7 @@ function createTimeoutController(timeoutMs: number = REQUEST_TIMEOUT_MS): {
     timeoutId.unref()
   }
 
-  return { controller, timeoutId }
+  return { controller, timeoutId, timeoutMs }
 }
 
 /**
@@ -154,7 +184,7 @@ export async function zohoRequest<T>(
   }
 
   // Security: Add request timeout
-  const { controller, timeoutId } = createTimeoutController()
+  const { controller, timeoutId, timeoutMs } = createTimeoutController()
 
   const options: RequestInit = {
     method,
@@ -177,7 +207,7 @@ export async function zohoRequest<T>(
     if (error instanceof Error && error.name === "AbortError") {
       return {
         ok: false,
-        errorMessage: `Request timeout after ${REQUEST_TIMEOUT_MS / 1000} seconds`,
+        errorMessage: `Request timeout after ${timeoutMs / 1000} seconds`,
       }
     }
     return {
@@ -308,7 +338,8 @@ export async function zohoUploadAttachment(
     }
 
     fileBuffer = await fh.readFile()
-    fileName = path.basename(resolvedPath)
+    // Security: Sanitize filename to prevent header injection and path traversal
+    fileName = sanitizeFilename(path.basename(resolvedPath))
     mimeType = getMimeType(resolvedPath)
   } catch (e) {
     const err = e as NodeJS.ErrnoException
@@ -350,7 +381,7 @@ export async function zohoUploadAttachment(
   formData.append("attachment", blob, fileName)
 
   // Security: Add request timeout
-  const { controller, timeoutId } = createTimeoutController()
+  const { controller, timeoutId, timeoutMs } = createTimeoutController()
 
   try {
     const response = await fetch(url.toString(), {
@@ -368,7 +399,7 @@ export async function zohoUploadAttachment(
     if (error instanceof Error && error.name === "AbortError") {
       return {
         ok: false,
-        errorMessage: `Upload timeout after ${REQUEST_TIMEOUT_MS / 1000} seconds`,
+        errorMessage: `Upload timeout after ${timeoutMs / 1000} seconds`,
       }
     }
     return {
@@ -423,7 +454,7 @@ export async function zohoListOrganizations(): Promise<ParsedResponse<Record<str
   }
 
   // Security: Add request timeout
-  const { controller, timeoutId } = createTimeoutController()
+  const { controller, timeoutId, timeoutMs } = createTimeoutController()
 
   try {
     const response = await fetch(`${config.apiUrl}/organizations`, {
@@ -440,7 +471,7 @@ export async function zohoListOrganizations(): Promise<ParsedResponse<Record<str
     if (error instanceof Error && error.name === "AbortError") {
       return {
         ok: false,
-        errorMessage: `Request timeout after ${REQUEST_TIMEOUT_MS / 1000} seconds`,
+        errorMessage: `Request timeout after ${timeoutMs / 1000} seconds`,
       }
     }
     return {
