@@ -271,7 +271,8 @@ export async function zohoUploadAttachment(
   if (!fs.existsSync(filePath)) {
     return {
       ok: false,
-      errorMessage: `File not found: ${filePath}`,
+      // Security: Don't expose file path in error message
+      errorMessage: "File not found or inaccessible",
     }
   }
 
