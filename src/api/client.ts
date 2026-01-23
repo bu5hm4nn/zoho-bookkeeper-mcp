@@ -68,14 +68,26 @@ function validateFilePath(filePath: string): {
 }
 
 /**
- * Validate file size before reading
+ * Validate file size and type before reading
  * Security: Prevents OOM attacks from large files
+ * Security: Rejects non-regular files (symlinks, directories, FIFOs, sockets, devices)
  */
 async function validateFileSize(
   filePath: string
 ): Promise<{ valid: boolean; error?: string; size?: number }> {
   try {
+    // Security: Reject symlinks early (use lstat to check link itself, not target)
+    const lstats = await fs.promises.lstat(filePath)
+    if (lstats.isSymbolicLink()) {
+      return { valid: false, error: "Symlinks are not allowed for uploads" }
+    }
+
+    // Security: Ensure it's a regular file (rejects directories, FIFOs, sockets, devices)
     const stats = await fs.promises.stat(filePath)
+    if (!stats.isFile()) {
+      return { valid: false, error: "Upload path must be a regular file" }
+    }
+
     if (stats.size > MAX_FILE_SIZE_BYTES) {
       return {
         valid: false,
