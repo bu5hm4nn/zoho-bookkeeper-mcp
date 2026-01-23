@@ -436,7 +436,8 @@ describe("Zoho API Client", () => {
     })
 
     it("handles non-existent file", async () => {
-      // Non-existent file fails path validation since realpath can't resolve it
+      // Non-existent file may fail at path validation (if dir doesn't exist)
+      // or at file open (if dir exists but file doesn't)
       const result = await zohoUploadAttachment(
         "/journals/123/attachment",
         "org-123",
@@ -444,8 +445,11 @@ describe("Zoho API Client", () => {
       )
 
       expect(result.ok).toBe(false)
-      // Path validation fails before file existence check
-      expect(result.errorMessage).toContain("not in allowed upload directories")
+      // Either "not in allowed upload directories" or "File not found or inaccessible"
+      expect(
+        result.errorMessage?.includes("not in allowed upload directories") ||
+          result.errorMessage?.includes("File not found")
+      ).toBe(true)
     })
 
     it("returns error when organization ID is missing", async () => {
