@@ -13,9 +13,10 @@ import { parseZohoResponse, type ParsedResponse } from "../utils/response-parser
 // Files can only be uploaded from these directories or their subdirectories
 const ALLOWED_UPLOAD_DIRECTORIES = [
   "/app/documents", // Docker container path
-  "/tmp", // Temporary files
-  process.env.HOME ? path.join(process.env.HOME, "Documents") : "/home/Documents", // User documents
-]
+  "/tmp/zoho-bookkeeper-uploads", // App-specific temp directory (narrower than /tmp)
+  process.env.HOME ? path.join(process.env.HOME, "Documents") : undefined, // User documents
+  process.env.ZOHO_ALLOWED_UPLOAD_DIR, // Optional override/additional safe directory
+].filter((d): d is string => Boolean(d))
 
 /**
  * Validate that a file path is within allowed directories (prevent path traversal)
@@ -265,8 +266,8 @@ export async function zohoUploadAttachment(
   // Security: Use resolved path for all subsequent operations to prevent TOCTOU attacks
   const resolvedPath = pathValidation.resolvedPath
 
-  // Validate the attachment file type (use original filePath for extension check)
-  const validation = validateAttachment(filePath)
+  // Validate the attachment file type using resolved path (ensures checks match the file being uploaded)
+  const validation = validateAttachment(resolvedPath)
   if (!validation.valid) {
     return {
       ok: false,
