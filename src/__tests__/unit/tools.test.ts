@@ -10,13 +10,9 @@ vi.mock("../../api/client.js", () => ({
   zohoListOrganizations: vi.fn(),
   zohoGet: vi.fn(),
   zohoPost: vi.fn(),
-  zohoPut: vi.fn(),
-  zohoDelete: vi.fn(),
-  zohoUploadAttachment: vi.fn(),
-  zohoDeleteAttachment: vi.fn(),
 }))
 
-import { zohoListOrganizations, zohoGet, zohoPost, zohoDelete } from "../../api/client.js"
+import { zohoListOrganizations, zohoGet, zohoPost } from "../../api/client.js"
 import { registerOrganizationTools } from "../../tools/organizations.js"
 import { registerContactTools } from "../../tools/contacts.js"
 import { registerChartOfAccountsTools } from "../../tools/chart-of-accounts.js"
@@ -24,7 +20,6 @@ import { registerChartOfAccountsTools } from "../../tools/chart-of-accounts.js"
 const mockZohoListOrganizations = vi.mocked(zohoListOrganizations)
 const mockZohoGet = vi.mocked(zohoGet)
 const mockZohoPost = vi.mocked(zohoPost)
-const mockZohoDelete = vi.mocked(zohoDelete)
 
 describe("MCP Tools", () => {
   let server: FastMCP
