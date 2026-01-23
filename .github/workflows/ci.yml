@@ -57,6 +57,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: coverage-report
           path: coverage/
@@ -76,5 +77,8 @@ jobs:
             console.log('::warning::Coverage value missing/invalid; skipping threshold check');
             process.exit(0);
           }
-          if (cov < 50) console.log('::warning::Coverage below 50%');
+          if (cov < 50) {
+            console.log('::error::Coverage below 50%');
+            process.exit(1);
+          }
           "

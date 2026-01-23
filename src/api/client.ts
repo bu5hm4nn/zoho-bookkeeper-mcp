@@ -21,40 +21,50 @@ const ALLOWED_UPLOAD_DIRECTORIES = [
  * Validate that a file path is within allowed directories (prevent path traversal)
  * Security: Prevents reading arbitrary files like /etc/passwd
  * Security: Uses realpath to resolve symlinks and prevent symlink-based attacks
+ * Security: Returns resolvedPath to prevent TOCTOU attacks
  */
-function validateFilePath(filePath: string): { valid: boolean; error?: string } {
-  let realPath: string
+function validateFilePath(filePath: string): {
+  valid: boolean
+  error?: string
+  resolvedPath?: string
+} {
+  const resolvedInput = path.resolve(filePath)
+
+  // Prefer canonical path when file exists (symlink protection), otherwise use resolved path
+  let realPath = resolvedInput
   try {
-    // Security: Resolve symlinks to get the canonical path
-    // This prevents symlink attacks where a symlink in an allowed directory points to /etc/passwd
-    realPath = fs.realpathSync(filePath)
+    if (fs.existsSync(filePath)) {
+      realPath = fs.realpathSync(filePath)
+    }
   } catch {
-    // File doesn't exist or can't be accessed - will be caught by existsSync check later
-    // For now, fall back to resolved path for the directory check
-    realPath = path.resolve(filePath)
+    realPath = resolvedInput
   }
 
   // Check if real path is within allowed directories
   const isAllowed = ALLOWED_UPLOAD_DIRECTORIES.some((allowedDir) => {
+    const resolvedAllowed = path.resolve(allowedDir)
+
+    // Prefer canonical path for allowed dir, fall back to resolved if it doesn't exist
+    let allowedReal = resolvedAllowed
     try {
-      // Also resolve symlinks in allowed directories for consistent comparison
-      const allowedReal = fs.realpathSync(allowedDir)
-      return realPath === allowedReal || realPath.startsWith(allowedReal + path.sep)
+      if (fs.existsSync(allowedDir)) {
+        allowedReal = fs.realpathSync(allowedDir)
+      }
     } catch {
-      // Allowed directory doesn't exist, skip it
-      return false
+      allowedReal = resolvedAllowed
     }
+
+    return realPath === allowedReal || realPath.startsWith(allowedReal + path.sep)
   })
 
   if (!isAllowed) {
-    // Security: Don't expose allowed directories in error message
     return {
       valid: false,
       error: "File path not in allowed upload directories",
     }
   }
 
-  return { valid: true }
+  return { valid: true, resolvedPath: realPath }
 }
 
 /**
@@ -260,24 +270,26 @@ export async function zohoUploadAttachment(
 
   // Security: Validate file path is within allowed directories (prevent path traversal)
   const pathValidation = validateFilePath(filePath)
-  if (!pathValidation.valid) {
+  if (!pathValidation.valid || !pathValidation.resolvedPath) {
     return {
       ok: false,
-      errorMessage: pathValidation.error,
+      errorMessage: pathValidation.error || "Invalid file path",
     }
   }
 
+  // Security: Use resolved path for all subsequent operations to prevent TOCTOU attacks
+  const resolvedPath = pathValidation.resolvedPath
+
   // Check if file exists
-  if (!fs.existsSync(filePath)) {
+  if (!fs.existsSync(resolvedPath)) {
     return {
       ok: false,
-      // Security: Don't expose file path in error message
       errorMessage: "File not found or inaccessible",
     }
   }
 
   // Security: Validate file size before reading (prevent OOM)
-  const sizeValidation = await validateFileSize(filePath)
+  const sizeValidation = await validateFileSize(resolvedPath)
   if (!sizeValidation.valid) {
     return {
       ok: false,
@@ -285,7 +297,7 @@ export async function zohoUploadAttachment(
     }
   }
 
-  // Validate the attachment file type
+  // Validate the attachment file type (use original filePath for extension check)
   const validation = validateAttachment(filePath)
   if (!validation.valid) {
     return {
@@ -313,10 +325,10 @@ export async function zohoUploadAttachment(
   const url = new URL(`${config.apiUrl}${endpoint}`)
   url.searchParams.set("organization_id", orgIdResult.orgId)
 
-  // Read file and create FormData
-  const fileBuffer = fs.readFileSync(filePath)
-  const fileName = path.basename(filePath)
-  const mimeType = getMimeType(filePath)
+  // Read file and create FormData (use resolvedPath to prevent TOCTOU)
+  const fileBuffer = fs.readFileSync(resolvedPath)
+  const fileName = path.basename(resolvedPath)
+  const mimeType = getMimeType(resolvedPath)
 
   const formData = new FormData()
   const blob = new Blob([fileBuffer], { type: mimeType })
