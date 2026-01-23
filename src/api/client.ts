@@ -282,7 +282,13 @@ export async function zohoUploadAttachment(
 
   let fh: fs.promises.FileHandle | undefined
   try {
-    fh = await fs.promises.open(resolvedPath, "r")
+    // Security: Use O_NOFOLLOW to prevent symlink-based path traversal attacks
+    const flags =
+      typeof fs.constants.O_NOFOLLOW === "number"
+        ? fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
+        : fs.constants.O_RDONLY
+
+    fh = await fs.promises.open(resolvedPath, flags)
     const stats = await fh.stat()
 
     // Security: Ensure it's a regular file (rejects directories, FIFOs, sockets, devices)
@@ -304,7 +310,14 @@ export async function zohoUploadAttachment(
     fileBuffer = await fh.readFile()
     fileName = path.basename(resolvedPath)
     mimeType = getMimeType(resolvedPath)
-  } catch {
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException
+    if (err?.code === "ELOOP") {
+      return {
+        ok: false,
+        errorMessage: "Symlinks are not allowed for uploads",
+      }
+    }
     return {
       ok: false,
       errorMessage: "File not found or inaccessible",
