@@ -20,7 +20,7 @@ jobs:
         with:
           node-version: 22
           cache: 'pnpm'
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm build
@@ -39,7 +39,7 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'pnpm'
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install
       - run: pnpm test
       - name: Coverage Report
         if: matrix.node-version == 22
