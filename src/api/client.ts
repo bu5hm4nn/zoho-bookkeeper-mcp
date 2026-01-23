@@ -68,39 +68,6 @@ function validateFilePath(filePath: string): {
 }
 
 /**
- * Validate file size and type before reading
- * Security: Prevents OOM attacks from large files
- * Security: Rejects non-regular files (symlinks, directories, FIFOs, sockets, devices)
- */
-async function validateFileSize(
-  filePath: string
-): Promise<{ valid: boolean; error?: string; size?: number }> {
-  try {
-    // Security: Reject symlinks early (use lstat to check link itself, not target)
-    const lstats = await fs.promises.lstat(filePath)
-    if (lstats.isSymbolicLink()) {
-      return { valid: false, error: "Symlinks are not allowed for uploads" }
-    }
-
-    // Security: Ensure it's a regular file (rejects directories, FIFOs, sockets, devices)
-    const stats = await fs.promises.stat(filePath)
-    if (!stats.isFile()) {
-      return { valid: false, error: "Upload path must be a regular file" }
-    }
-
-    if (stats.size > MAX_FILE_SIZE_BYTES) {
-      return {
-        valid: false,
-        error: `File too large: ${(stats.size / 1024 / 1024).toFixed(2)}MB (max ${MAX_FILE_SIZE_BYTES / 1024 / 1024}MB)`,
-      }
-    }
-    return { valid: true, size: stats.size }
-  } catch {
-    return { valid: false, error: "Unable to read file size" }
-  }
-}
-
-/**
  * Create an AbortController with timeout
  * Security: Prevents hanging requests
  */
@@ -110,6 +77,12 @@ function createTimeoutController(timeoutMs: number = REQUEST_TIMEOUT_MS): {
 } {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  // Prevent the timeout from keeping the process alive (useful for tests/CLI)
+  if (typeof timeoutId === "object" && "unref" in timeoutId) {
+    timeoutId.unref()
+  }
+
   return { controller, timeoutId }
 }
 
@@ -198,10 +171,8 @@ export async function zohoRequest<T>(
 
   try {
     const response = await fetch(url.toString(), options)
-    clearTimeout(timeoutId)
     return parseZohoResponse<T>(response, endpoint)
   } catch (error) {
-    clearTimeout(timeoutId)
     if (error instanceof Error && error.name === "AbortError") {
       return {
         ok: false,
@@ -212,6 +183,8 @@ export async function zohoRequest<T>(
       ok: false,
       errorMessage: `Request failed: ${error instanceof Error ? error.message : String(error)}`,
     }
+  } finally {
+    clearTimeout(timeoutId)
   }
 }
 
@@ -292,23 +265,6 @@ export async function zohoUploadAttachment(
   // Security: Use resolved path for all subsequent operations to prevent TOCTOU attacks
   const resolvedPath = pathValidation.resolvedPath
 
-  // Check if file exists
-  if (!fs.existsSync(resolvedPath)) {
-    return {
-      ok: false,
-      errorMessage: "File not found or inaccessible",
-    }
-  }
-
-  // Security: Validate file size before reading (prevent OOM)
-  const sizeValidation = await validateFileSize(resolvedPath)
-  if (!sizeValidation.valid) {
-    return {
-      ok: false,
-      errorMessage: sizeValidation.error,
-    }
-  }
-
   // Validate the attachment file type (use original filePath for extension check)
   const validation = validateAttachment(filePath)
   if (!validation.valid) {
@@ -316,6 +272,44 @@ export async function zohoUploadAttachment(
       ok: false,
       errorMessage: validation.error,
     }
+  }
+
+  // Security: Open file once and validate/read via same handle (prevents TOCTOU + avoids blocking I/O)
+  let fileBuffer: Buffer
+  let fileName: string
+  let mimeType: string
+
+  let fh: fs.promises.FileHandle | undefined
+  try {
+    fh = await fs.promises.open(resolvedPath, "r")
+    const stats = await fh.stat()
+
+    // Security: Ensure it's a regular file (rejects directories, FIFOs, sockets, devices)
+    if (!stats.isFile()) {
+      return {
+        ok: false,
+        errorMessage: "Upload path must be a regular file",
+      }
+    }
+
+    // Security: Validate file size (prevent OOM)
+    if (stats.size > MAX_FILE_SIZE_BYTES) {
+      return {
+        ok: false,
+        errorMessage: `File too large: ${(stats.size / 1024 / 1024).toFixed(2)}MB (max ${MAX_FILE_SIZE_BYTES / 1024 / 1024}MB)`,
+      }
+    }
+
+    fileBuffer = await fh.readFile()
+    fileName = path.basename(resolvedPath)
+    mimeType = getMimeType(resolvedPath)
+  } catch {
+    return {
+      ok: false,
+      errorMessage: "File not found or inaccessible",
+    }
+  } finally {
+    await fh?.close().catch(() => undefined)
   }
 
   try {
@@ -337,11 +331,6 @@ export async function zohoUploadAttachment(
   const url = new URL(`${config.apiUrl}${endpoint}`)
   url.searchParams.set("organization_id", orgIdResult.orgId)
 
-  // Read file and create FormData (use resolvedPath to prevent TOCTOU)
-  const fileBuffer = fs.readFileSync(resolvedPath)
-  const fileName = path.basename(resolvedPath)
-  const mimeType = getMimeType(resolvedPath)
-
   const formData = new FormData()
   const blob = new Blob([fileBuffer], { type: mimeType })
   formData.append("attachment", blob, fileName)
@@ -360,10 +349,8 @@ export async function zohoUploadAttachment(
       signal: controller.signal,
     })
 
-    clearTimeout(timeoutId)
     return parseZohoResponse<Record<string, unknown>>(response, endpoint)
   } catch (error) {
-    clearTimeout(timeoutId)
     if (error instanceof Error && error.name === "AbortError") {
       return {
         ok: false,
@@ -374,6 +361,8 @@ export async function zohoUploadAttachment(
       ok: false,
       errorMessage: `Upload failed: ${error instanceof Error ? error.message : String(error)}`,
     }
+  } finally {
+    clearTimeout(timeoutId)
   }
 }
 
@@ -432,10 +421,8 @@ export async function zohoListOrganizations(): Promise<ParsedResponse<Record<str
       signal: controller.signal,
     })
 
-    clearTimeout(timeoutId)
     return parseZohoResponse<Record<string, unknown>>(response, "/organizations")
   } catch (error) {
-    clearTimeout(timeoutId)
     if (error instanceof Error && error.name === "AbortError") {
       return {
         ok: false,
@@ -446,5 +433,7 @@ export async function zohoListOrganizations(): Promise<ParsedResponse<Record<str
       ok: false,
       errorMessage: `Request failed: ${error instanceof Error ? error.message : String(error)}`,
     }
+  } finally {
+    clearTimeout(timeoutId)
   }
 }
