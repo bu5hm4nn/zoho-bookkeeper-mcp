@@ -2,13 +2,15 @@
 import { FastMCP } from "fastmcp";
 
 // src/tools/organizations.ts
-import { z } from "zod";
+import { z as z2 } from "zod";
 
 // src/api/client.ts
 import * as fs from "fs";
 import * as path2 from "path";
 
 // src/config.ts
+var MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+var REQUEST_TIMEOUT_MS = 3e4;
 function getZohoConfig() {
   const clientId = process.env.ZOHO_CLIENT_ID || "";
   const clientSecret = process.env.ZOHO_CLIENT_SECRET || "";
@@ -38,6 +40,9 @@ function validateZohoConfig(config) {
   }
   if (!config.refreshToken) {
     return { valid: false, error: "ZOHO_REFRESH_TOKEN is not configured" };
+  }
+  if (!config.apiUrl.startsWith("https://")) {
+    return { valid: false, error: "ZOHO_API_URL must use HTTPS" };
   }
   return { valid: true };
 }
@@ -111,7 +116,6 @@ async function refreshAccessToken(config) {
       accessToken: data.access_token,
       expiresAt: Date.now() + expiresIn * 1e3
     };
-    console.log("Zoho access token refreshed successfully");
     return tokenState.accessToken;
   } catch (error) {
     if (error instanceof ZohoAuthError) {
@@ -194,31 +198,59 @@ function validateAttachment(filePath) {
 // src/utils/errors.ts
 var ZOHO_ERROR_CODES = {
   0: { message: "Success", action: "No action needed", category: "validation" },
-  1: { message: "Internal error", action: "Try again later or contact support", category: "server" },
+  1: {
+    message: "Internal error",
+    action: "Try again later or contact support",
+    category: "server"
+  },
   2: { message: "Invalid URL", action: "Check the API endpoint URL", category: "validation" },
   4: {
     message: "Invalid value",
     action: "Check the parameter values match expected types",
     category: "validation"
   },
-  5: { message: "Invalid parameter", action: "Review required and optional parameters", category: "validation" },
+  5: {
+    message: "Invalid parameter",
+    action: "Review required and optional parameters",
+    category: "validation"
+  },
   9: {
     message: "Record not found",
     action: "Verify the ID exists - use list endpoints to find valid IDs",
     category: "not_found"
   },
-  10: { message: "Missing mandatory parameter", action: "Add the required parameter to your request", category: "validation" },
-  14: { message: "Authorization failed", action: "Check your access token and permissions", category: "auth" },
-  36: { message: "Rate limit exceeded", action: "Wait 1 minute before retrying", category: "rate_limit" },
-  57: { message: "OAuth token expired", action: "Token will be auto-refreshed on next request", category: "auth" },
+  10: {
+    message: "Missing mandatory parameter",
+    action: "Add the required parameter to your request",
+    category: "validation"
+  },
+  14: {
+    message: "Authorization failed",
+    action: "Check your access token and permissions",
+    category: "auth"
+  },
+  36: {
+    message: "Rate limit exceeded",
+    action: "Wait 1 minute before retrying",
+    category: "rate_limit"
+  },
+  57: {
+    message: "OAuth token expired",
+    action: "Token will be auto-refreshed on next request",
+    category: "auth"
+  },
   2006: {
     message: "Record not found",
     action: "The specified resource does not exist. Use list endpoints to find valid IDs.",
     category: "not_found"
   },
-  6e3: { message: "Invalid OAuth token", action: "Token will be auto-refreshed on next request", category: "auth" }
+  6e3: {
+    message: "Invalid OAuth token",
+    action: "Token will be auto-refreshed on next request",
+    category: "auth"
+  }
 };
-function parseZohoError(code, apiMessage, endpoint, rawResponse) {
+function parseZohoError(code, apiMessage, endpoint, _rawResponse) {
   const knownError = ZOHO_ERROR_CODES[code];
   if (knownError) {
     return {
@@ -226,8 +258,7 @@ function parseZohoError(code, apiMessage, endpoint, rawResponse) {
       message: apiMessage || knownError.message,
       category: knownError.category,
       suggestedAction: knownError.action,
-      endpoint,
-      rawResponse
+      endpoint
     };
   }
   return {
@@ -235,8 +266,7 @@ function parseZohoError(code, apiMessage, endpoint, rawResponse) {
     message: apiMessage || "Unknown error",
     category: "unknown",
     suggestedAction: "Check the Zoho Books API documentation for this error code",
-    endpoint,
-    rawResponse
+    endpoint
   };
 }
 function formatErrorForAI(error) {
@@ -267,8 +297,8 @@ async function parseZohoResponse(response, endpoint) {
           message: response.statusText,
           category: response.status >= 500 ? "server" : "unknown",
           suggestedAction: "Check the API endpoint and try again",
-          endpoint,
-          rawResponse: responseText
+          endpoint
+          // Note: rawResponse intentionally omitted to prevent leaking sensitive data
         },
         errorMessage: `HTTP ${response.status}: ${response.statusText}`
       };
@@ -307,6 +337,63 @@ async function parseZohoResponse(response, endpoint) {
 }
 
 // src/api/client.ts
+var ALLOWED_UPLOAD_DIRECTORIES = [
+  "/app/documents",
+  // Docker container path
+  "/tmp/zoho-bookkeeper-uploads",
+  // App-specific temp directory (narrower than /tmp)
+  process.env.HOME ? path2.join(process.env.HOME, "Documents") : void 0,
+  // User documents
+  process.env.ZOHO_ALLOWED_UPLOAD_DIR
+  // Optional override/additional safe directory
+].filter((d) => Boolean(d));
+function normalizeForCompare(p) {
+  const normalized = path2.normalize(p);
+  return process.platform === "win32" || process.platform === "darwin" ? normalized.toLowerCase() : normalized;
+}
+function sanitizeFilename(filename) {
+  return filename.replace(/[\r\n]/g, "").replace(/[/\\]/g, "_");
+}
+function validateFilePath(filePath) {
+  const resolvedInput = path2.resolve(filePath);
+  let realPath = resolvedInput;
+  try {
+    if (fs.existsSync(filePath)) {
+      realPath = fs.realpathSync(filePath);
+    }
+  } catch {
+    realPath = resolvedInput;
+  }
+  const normalizedRealPath = normalizeForCompare(realPath);
+  const isAllowed = ALLOWED_UPLOAD_DIRECTORIES.some((allowedDir) => {
+    const resolvedAllowed = path2.resolve(allowedDir);
+    let allowedReal = resolvedAllowed;
+    try {
+      if (fs.existsSync(allowedDir)) {
+        allowedReal = fs.realpathSync(allowedDir);
+      }
+    } catch {
+      allowedReal = resolvedAllowed;
+    }
+    const normalizedAllowed = normalizeForCompare(allowedReal);
+    return normalizedRealPath === normalizedAllowed || normalizedRealPath.startsWith(normalizedAllowed + path2.sep);
+  });
+  if (!isAllowed) {
+    return {
+      valid: false,
+      error: "File path not in allowed upload directories"
+    };
+  }
+  return { valid: true, resolvedPath: realPath };
+}
+function createTimeoutController(timeoutMs = REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  if (typeof timeoutId === "object" && "unref" in timeoutId) {
+    timeoutId.unref();
+  }
+  return { controller, timeoutId, timeoutMs };
+}
 function resolveOrganizationId(organizationId) {
   const config = getZohoConfig();
   const orgId = organizationId || config.organizationId;
@@ -348,12 +435,14 @@ async function zohoRequest(method, endpoint, organizationId, body, queryParams) 
       url.searchParams.set(key, value);
     });
   }
+  const { controller, timeoutId, timeoutMs } = createTimeoutController();
   const options = {
     method,
     headers: {
       Authorization: `Zoho-oauthtoken ${token}`,
       "Content-Type": "application/json"
-    }
+    },
+    signal: controller.signal
   };
   if (body && method !== "GET" && method !== "HEAD") {
     options.body = JSON.stringify({ JSONString: JSON.stringify(body) });
@@ -362,10 +451,18 @@ async function zohoRequest(method, endpoint, organizationId, body, queryParams) 
     const response = await fetch(url.toString(), options);
     return parseZohoResponse(response, endpoint);
   } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      return {
+        ok: false,
+        errorMessage: `Request timeout after ${timeoutMs / 1e3} seconds`
+      };
+    }
     return {
       ok: false,
       errorMessage: `Request failed: ${error instanceof Error ? error.message : String(error)}`
     };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 async function zohoGet(endpoint, organizationId, queryParams) {
@@ -390,12 +487,58 @@ async function zohoUploadAttachment(endpoint, organizationId, filePath) {
     };
   }
   let token;
-  const validation = validateAttachment(filePath);
+  const pathValidation = validateFilePath(filePath);
+  if (!pathValidation.valid || !pathValidation.resolvedPath) {
+    return {
+      ok: false,
+      errorMessage: pathValidation.error || "Invalid file path"
+    };
+  }
+  const resolvedPath = pathValidation.resolvedPath;
+  const validation = validateAttachment(resolvedPath);
   if (!validation.valid) {
     return {
       ok: false,
       errorMessage: validation.error
     };
+  }
+  let fileBuffer;
+  let fileName;
+  let mimeType;
+  let fh;
+  try {
+    const flags = typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW : fs.constants.O_RDONLY;
+    fh = await fs.promises.open(resolvedPath, flags);
+    const stats = await fh.stat();
+    if (!stats.isFile()) {
+      return {
+        ok: false,
+        errorMessage: "Upload path must be a regular file"
+      };
+    }
+    if (stats.size > MAX_FILE_SIZE_BYTES) {
+      return {
+        ok: false,
+        errorMessage: `File too large: ${(stats.size / 1024 / 1024).toFixed(2)}MB (max ${MAX_FILE_SIZE_BYTES / 1024 / 1024}MB)`
+      };
+    }
+    fileBuffer = await fh.readFile();
+    fileName = sanitizeFilename(path2.basename(resolvedPath));
+    mimeType = getMimeType(resolvedPath);
+  } catch (e) {
+    const err = e;
+    if (err?.code === "ELOOP") {
+      return {
+        ok: false,
+        errorMessage: "Symlinks are not allowed for uploads"
+      };
+    }
+    return {
+      ok: false,
+      errorMessage: "File not found or inaccessible"
+    };
+  } finally {
+    await fh?.close().catch(() => void 0);
   }
   try {
     token = await getAccessToken();
@@ -411,20 +554,12 @@ async function zohoUploadAttachment(endpoint, organizationId, filePath) {
       errorMessage: `Authentication error: ${error instanceof Error ? error.message : String(error)}`
     };
   }
-  if (!fs.existsSync(filePath)) {
-    return {
-      ok: false,
-      errorMessage: `File not found: ${filePath}`
-    };
-  }
   const url = new URL(`${config.apiUrl}${endpoint}`);
   url.searchParams.set("organization_id", orgIdResult.orgId);
-  const fileBuffer = fs.readFileSync(filePath);
-  const fileName = path2.basename(filePath);
-  const mimeType = getMimeType(filePath);
   const formData = new FormData();
   const blob = new Blob([fileBuffer], { type: mimeType });
   formData.append("attachment", blob, fileName);
+  const { controller, timeoutId, timeoutMs } = createTimeoutController();
   try {
     const response = await fetch(url.toString(), {
       method: "POST",
@@ -432,14 +567,23 @@ async function zohoUploadAttachment(endpoint, organizationId, filePath) {
         Authorization: `Zoho-oauthtoken ${token}`
         // DO NOT set Content-Type header - let fetch set it with the correct multipart boundary
       },
-      body: formData
+      body: formData,
+      signal: controller.signal
     });
     return parseZohoResponse(response, endpoint);
   } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      return {
+        ok: false,
+        errorMessage: `Upload timeout after ${timeoutMs / 1e3} seconds`
+      };
+    }
     return {
       ok: false,
       errorMessage: `Upload failed: ${error instanceof Error ? error.message : String(error)}`
     };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 async function zohoDeleteAttachment(endpoint, organizationId) {
@@ -462,22 +606,58 @@ async function zohoListOrganizations() {
       errorMessage: `Authentication error: ${error instanceof Error ? error.message : String(error)}`
     };
   }
+  const { controller, timeoutId, timeoutMs } = createTimeoutController();
   try {
     const response = await fetch(`${config.apiUrl}/organizations`, {
       method: "GET",
       headers: {
         Authorization: `Zoho-oauthtoken ${token}`,
         "Content-Type": "application/json"
-      }
+      },
+      signal: controller.signal
     });
     return parseZohoResponse(response, "/organizations");
   } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      return {
+        ok: false,
+        errorMessage: `Request timeout after ${timeoutMs / 1e3} seconds`
+      };
+    }
     return {
       ok: false,
       errorMessage: `Request failed: ${error instanceof Error ? error.message : String(error)}`
     };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
+
+// src/utils/validation.ts
+import { z } from "zod";
+var DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+var dateSchema = z.string().regex(DATE_REGEX, "Date must be in YYYY-MM-DD format").refine(
+  (date) => {
+    const [yStr, mStr, dStr] = date.split("-");
+    const y = Number(yStr);
+    const m = Number(mStr);
+    const d = Number(dStr);
+    if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return false;
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    return dt.toISOString().slice(0, 10) === date;
+  },
+  { message: "Invalid date value" }
+);
+var optionalDateSchema = dateSchema.optional();
+var moneySchema = z.number().positive("Amount must be positive").max(99999999999e-2, "Amount exceeds maximum allowed value").refine((val) => Number.isFinite(val), { message: "Amount must be a finite number" }).refine((val) => Math.round(val * 100) / 100 === val, {
+  message: "Amount must have at most 2 decimal places"
+});
+var moneyOrZeroSchema = z.number().min(0, "Amount cannot be negative").max(99999999999e-2, "Amount exceeds maximum allowed value").refine((val) => Number.isFinite(val), { message: "Amount must be a finite number" }).refine((val) => Math.round(val * 100) / 100 === val, {
+  message: "Amount must have at most 2 decimal places"
+});
+var organizationIdSchema = z.string().regex(/^[a-zA-Z0-9_-]+$/, "Invalid organization ID format").max(50, "Organization ID too long");
+var optionalOrganizationIdSchema = organizationIdSchema.optional();
+var entityIdSchema = z.string().regex(/^[a-zA-Z0-9_-]+$/, "Invalid ID format").max(50, "ID too long");
 
 // src/tools/organizations.ts
 function registerOrganizationTools(server2) {
@@ -486,7 +666,7 @@ function registerOrganizationTools(server2) {
     description: `List all Zoho organizations the user has access to.
 Use this tool first to get organization_id for all other tools.
 Returns organization name, ID, currency, and timezone.`,
-    parameters: z.object({}),
+    parameters: z2.object({}),
     annotations: {
       title: "List Organizations",
       readOnlyHint: true,
@@ -520,8 +700,10 @@ Use the organization_id in subsequent API calls.`;
     name: "get_organization",
     description: `Get detailed information about a specific organization.
 Returns full organization details including address, contact info, and settings.`,
-    parameters: z.object({
-      organization_id: z.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)")
+    parameters: z2.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      )
     }),
     annotations: {
       title: "Get Organization Details",
@@ -555,16 +737,18 @@ Returns full organization details including address, contact info, and settings.
 }
 
 // src/tools/chart-of-accounts.ts
-import { z as z2 } from "zod";
+import { z as z3 } from "zod";
 function registerChartOfAccountsTools(server2) {
   server2.addTool({
     name: "list_accounts",
     description: `List all accounts in the chart of accounts.
 Supports filtering by account type (e.g., income, expense, asset, liability, equity).
 Use this to find account_id values for journal entries and transactions.`,
-    parameters: z2.object({
-      organization_id: z2.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      filter_by: z2.enum([
+    parameters: z3.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      filter_by: z3.enum([
         "AccountType.All",
         "AccountType.Active",
         "AccountType.Inactive",
@@ -574,7 +758,7 @@ Use this to find account_id values for journal entries and transactions.`,
         "AccountType.Income",
         "AccountType.Expense"
       ]).optional().describe("Filter accounts by type"),
-      sort_column: z2.enum(["account_name", "account_type", "account_code"]).optional().describe("Column to sort by")
+      sort_column: z3.enum(["account_name", "account_type", "account_code"]).optional().describe("Column to sort by")
     }),
     annotations: {
       title: "List Chart of Accounts",
@@ -613,9 +797,11 @@ ${formatted}`;
     name: "get_account",
     description: `Get detailed information about a specific account.
 Returns account details including balance, currency, and parent account info.`,
-    parameters: z2.object({
-      organization_id: z2.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      account_id: z2.string().describe("Account ID")
+    parameters: z3.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      account_id: z3.string().describe("Account ID")
     }),
     annotations: {
       title: "Get Account Details",
@@ -664,14 +850,16 @@ Account types: income, expense, cost_of_goods_sold, other_income, other_expense,
 asset (bank, other_current_asset, fixed_asset, other_asset, cash, accounts_receivable),
 liability (other_current_liability, credit_card, long_term_liability, other_liability, accounts_payable),
 equity (equity, retained_earnings).`,
-    parameters: z2.object({
-      organization_id: z2.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      account_name: z2.string().describe("Name for the new account"),
-      account_type: z2.string().describe("Account type (e.g., expense, income, bank, accounts_receivable)"),
-      account_code: z2.string().optional().describe("Optional account code for reference"),
-      description: z2.string().optional().describe("Description of the account"),
-      currency_id: z2.string().optional().describe("Currency ID for the account"),
-      parent_account_id: z2.string().optional().describe("Parent account ID for sub-accounts")
+    parameters: z3.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      account_name: z3.string().describe("Name for the new account"),
+      account_type: z3.string().describe("Account type (e.g., expense, income, bank, accounts_receivable)"),
+      account_code: z3.string().optional().describe("Optional account code for reference"),
+      description: z3.string().optional().describe("Description of the account"),
+      currency_id: z3.string().optional().describe("Currency ID for the account"),
+      parent_account_id: z3.string().optional().describe("Parent account ID for sub-accounts")
     }),
     annotations: {
       title: "Create Account",
@@ -712,12 +900,14 @@ equity (equity, retained_earnings).`,
     description: `List transactions for a specific account.
 Returns all transactions (journals, invoices, bills, etc.) affecting this account.
 Useful for account reconciliation and analysis.`,
-    parameters: z2.object({
-      organization_id: z2.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      account_id: z2.string().describe("Account ID to get transactions for"),
-      date_start: z2.string().optional().describe("Start date (YYYY-MM-DD)"),
-      date_end: z2.string().optional().describe("End date (YYYY-MM-DD)"),
-      sort_column: z2.enum(["transaction_date", "amount"]).optional().describe("Column to sort by")
+    parameters: z3.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      account_id: z3.string().describe("Account ID to get transactions for"),
+      date_start: z3.string().optional().describe("Start date (YYYY-MM-DD)"),
+      date_end: z3.string().optional().describe("End date (YYYY-MM-DD)"),
+      sort_column: z3.enum(["transaction_date", "amount"]).optional().describe("Column to sort by")
     }),
     annotations: {
       title: "List Account Transactions",
@@ -758,13 +948,13 @@ ${formatted}`;
 }
 
 // src/tools/journals.ts
-import { z as z3 } from "zod";
-var lineItemSchema = z3.object({
-  account_id: z3.string().describe("Account ID from chart of accounts"),
-  debit_or_credit: z3.enum(["debit", "credit"]).describe("Whether this line is a debit or credit"),
-  amount: z3.number().positive().describe("Amount for this line item"),
-  description: z3.string().optional().describe("Description for this line item"),
-  customer_id: z3.string().optional().describe("Customer ID if applicable")
+import { z as z4 } from "zod";
+var lineItemSchema = z4.object({
+  account_id: entityIdSchema.describe("Account ID from chart of accounts"),
+  debit_or_credit: z4.enum(["debit", "credit"]).describe("Whether this line is a debit or credit"),
+  amount: moneySchema.describe("Amount for this line item (max 999,999,999.99, 2 decimal places)"),
+  description: z4.string().max(500).optional().describe("Description for this line item"),
+  customer_id: entityIdSchema.optional().describe("Customer ID if applicable")
 });
 function registerJournalTools(server2) {
   server2.addTool({
@@ -772,13 +962,15 @@ function registerJournalTools(server2) {
     description: `List all manual journal entries.
 Returns journal entries with date, reference number, and total.
 Use date filters to narrow down results.`,
-    parameters: z3.object({
-      organization_id: z3.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      date_start: z3.string().optional().describe("Start date (YYYY-MM-DD)"),
-      date_end: z3.string().optional().describe("End date (YYYY-MM-DD)"),
-      sort_column: z3.enum(["journal_date", "total", "created_time"]).optional(),
-      page: z3.number().int().positive().optional().describe("Page number"),
-      per_page: z3.number().int().min(1).max(200).optional().describe("Items per page (max 200)")
+    parameters: z4.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      date_start: optionalDateSchema.describe("Start date (YYYY-MM-DD)"),
+      date_end: optionalDateSchema.describe("End date (YYYY-MM-DD)"),
+      sort_column: z4.enum(["journal_date", "total", "created_time"]).optional(),
+      page: z4.number().int().positive().optional().describe("Page number"),
+      per_page: z4.number().int().min(1).max(200).optional().describe("Items per page (max 200)")
     }),
     annotations: {
       title: "List Journals",
@@ -819,9 +1011,11 @@ ${formatted}`;
     name: "get_journal",
     description: `Get detailed information about a specific journal entry.
 Returns full journal details including all line items.`,
-    parameters: z3.object({
-      organization_id: z3.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      journal_id: z3.string().describe("Journal ID")
+    parameters: z4.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      journal_id: entityIdSchema.describe("Journal ID")
     }),
     annotations: {
       title: "Get Journal Details",
@@ -867,12 +1061,14 @@ ${i + 1}. ${item.account_name || item.account_id} - ${amount}`;
     description: `Create a new manual journal entry.
 Line items must balance (total debits = total credits).
 Use list_accounts to find valid account_id values.`,
-    parameters: z3.object({
-      organization_id: z3.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      journal_date: z3.string().describe("Journal date (YYYY-MM-DD)"),
-      reference_number: z3.string().optional().describe("Reference number for the journal"),
-      notes: z3.string().optional().describe("Notes or memo for the journal"),
-      line_items: z3.array(lineItemSchema).min(2).describe("Array of line items (min 2, must balance)")
+    parameters: z4.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      journal_date: dateSchema.describe("Journal date (YYYY-MM-DD)"),
+      reference_number: z4.string().max(100).optional().describe("Reference number for the journal"),
+      notes: z4.string().max(2e3).optional().describe("Notes or memo for the journal"),
+      line_items: z4.array(lineItemSchema).min(2).describe("Array of line items (min 2, must balance)")
     }),
     annotations: {
       title: "Create Journal",
@@ -903,7 +1099,11 @@ Debits must equal credits for a valid journal entry.`;
       };
       if (args.reference_number) payload.reference_number = args.reference_number;
       if (args.notes) payload.notes = args.notes;
-      const result = await zohoPost("/journals", args.organization_id, payload);
+      const result = await zohoPost(
+        "/journals",
+        args.organization_id,
+        payload
+      );
       if (!result.ok) {
         return result.errorMessage || "Failed to create journal";
       }
@@ -926,13 +1126,15 @@ Use this journal_id to add attachments or update the journal.`;
     description: `Update an existing journal entry.
 Can update date, reference, notes, and line items.
 Line items must still balance after update.`,
-    parameters: z3.object({
-      organization_id: z3.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      journal_id: z3.string().describe("Journal ID to update"),
-      journal_date: z3.string().optional().describe("New journal date (YYYY-MM-DD)"),
-      reference_number: z3.string().optional().describe("New reference number"),
-      notes: z3.string().optional().describe("New notes"),
-      line_items: z3.array(lineItemSchema).min(2).optional().describe("New line items (replaces existing)")
+    parameters: z4.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      journal_id: entityIdSchema.describe("Journal ID to update"),
+      journal_date: optionalDateSchema.describe("New journal date (YYYY-MM-DD)"),
+      reference_number: z4.string().max(100).optional().describe("New reference number"),
+      notes: z4.string().max(2e3).optional().describe("New notes"),
+      line_items: z4.array(lineItemSchema).min(2).optional().describe("New line items (replaces existing)")
     }),
     annotations: {
       title: "Update Journal",
@@ -978,9 +1180,11 @@ Journal ID: \`${args.journal_id}\``;
     name: "delete_journal",
     description: `Delete a journal entry.
 This action cannot be undone. The journal will be permanently removed.`,
-    parameters: z3.object({
-      organization_id: z3.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      journal_id: z3.string().describe("Journal ID to delete")
+    parameters: z4.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      journal_id: entityIdSchema.describe("Journal ID to delete")
     }),
     annotations: {
       title: "Delete Journal",
@@ -1001,9 +1205,11 @@ Journal ID \`${args.journal_id}\` has been deleted.`;
     name: "publish_journal",
     description: `Publish (mark as posted) a draft journal entry.
 Published journals are finalized and affect account balances.`,
-    parameters: z3.object({
-      organization_id: z3.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      journal_id: z3.string().describe("Journal ID to publish")
+    parameters: z4.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      journal_id: entityIdSchema.describe("Journal ID to publish")
     }),
     annotations: {
       title: "Publish Journal",
@@ -1028,11 +1234,14 @@ Journal ID \`${args.journal_id}\` has been marked as published.`;
     name: "add_journal_attachment",
     description: `Upload a file attachment to a journal entry.
 Supported file types: PDF, PNG, JPG, JPEG, GIF, DOC, DOCX, XLS, XLSX.
-Use this to attach invoices, receipts, or supporting documents to journal entries.`,
-    parameters: z3.object({
-      organization_id: z3.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      journal_id: z3.string().describe("Journal ID to attach file to"),
-      file_path: z3.string().describe("Full local file path to the attachment")
+Use this to attach invoices, receipts, or supporting documents to journal entries.
+Files must be in allowed directories and under 10MB.`,
+    parameters: z4.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      journal_id: entityIdSchema.describe("Journal ID to attach file to"),
+      file_path: z4.string().max(500).describe("Full local file path to the attachment")
     }),
     annotations: {
       title: "Add Journal Attachment",
@@ -1060,9 +1269,11 @@ The attachment is now associated with this journal entry.`;
     name: "get_journal_attachment",
     description: `Get attachment information for a journal entry.
 Returns details about any files attached to the journal.`,
-    parameters: z3.object({
-      organization_id: z3.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      journal_id: z3.string().describe("Journal ID")
+    parameters: z4.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      journal_id: entityIdSchema.describe("Journal ID")
     }),
     annotations: {
       title: "Get Journal Attachment",
@@ -1108,9 +1319,11 @@ ${i + 1}. ${doc.file_name} (${doc.file_size_formatted || "Unknown"})`;
     name: "delete_journal_attachment",
     description: `Delete attachment from a journal entry.
 Removes the file association from the journal.`,
-    parameters: z3.object({
-      organization_id: z3.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      journal_id: z3.string().describe("Journal ID")
+    parameters: z4.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      journal_id: entityIdSchema.describe("Journal ID")
     }),
     annotations: {
       title: "Delete Journal Attachment",
@@ -1133,23 +1346,25 @@ Attachment removed from journal \`${args.journal_id}\`.`;
 }
 
 // src/tools/expenses.ts
-import { z as z4 } from "zod";
+import { z as z5 } from "zod";
 function registerExpenseTools(server2) {
   server2.addTool({
     name: "list_expenses",
     description: `List all expenses.
 Supports filtering by date, status, and customer.
 Returns expense details with account, amount, and vendor info.`,
-    parameters: z4.object({
-      organization_id: z4.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      date_start: z4.string().optional().describe("Start date (YYYY-MM-DD)"),
-      date_end: z4.string().optional().describe("End date (YYYY-MM-DD)"),
-      status: z4.enum(["unbilled", "invoiced", "reimbursed", "non-billable"]).optional().describe("Filter by status"),
-      customer_id: z4.string().optional().describe("Filter by customer"),
-      vendor_id: z4.string().optional().describe("Filter by vendor"),
-      sort_column: z4.enum(["date", "amount", "created_time"]).optional(),
-      page: z4.number().int().positive().optional(),
-      per_page: z4.number().int().min(1).max(200).optional()
+    parameters: z5.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      date_start: optionalDateSchema.describe("Start date (YYYY-MM-DD)"),
+      date_end: optionalDateSchema.describe("End date (YYYY-MM-DD)"),
+      status: z5.enum(["unbilled", "invoiced", "reimbursed", "non-billable"]).optional().describe("Filter by status"),
+      customer_id: entityIdSchema.optional().describe("Filter by customer"),
+      vendor_id: entityIdSchema.optional().describe("Filter by vendor"),
+      sort_column: z5.enum(["date", "amount", "created_time"]).optional(),
+      page: z5.number().int().positive().optional(),
+      per_page: z5.number().int().min(1).max(200).optional()
     }),
     annotations: {
       title: "List Expenses",
@@ -1195,9 +1410,11 @@ ${formatted}`;
     name: "get_expense",
     description: `Get detailed information about a specific expense.
 Returns full expense details including account, vendor, and billable status.`,
-    parameters: z4.object({
-      organization_id: z4.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      expense_id: z4.string().describe("Expense ID")
+    parameters: z5.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      expense_id: entityIdSchema.describe("Expense ID")
     }),
     annotations: {
       title: "Get Expense Details",
@@ -1236,17 +1453,21 @@ Returns full expense details including account, vendor, and billable status.`,
     description: `Create a new expense record.
 Requires account_id (expense account) and paid_through_account_id (payment account).
 Use list_accounts to find valid account IDs.`,
-    parameters: z4.object({
-      organization_id: z4.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      account_id: z4.string().describe("Expense account ID"),
-      paid_through_account_id: z4.string().describe("Payment account ID (bank/cash/credit card)"),
-      date: z4.string().describe("Expense date (YYYY-MM-DD)"),
-      amount: z4.number().positive().describe("Expense amount"),
-      description: z4.string().optional().describe("Description of the expense"),
-      reference_number: z4.string().optional().describe("Reference number"),
-      customer_id: z4.string().optional().describe("Customer ID if billable"),
-      vendor_id: z4.string().optional().describe("Vendor ID"),
-      is_billable: z4.boolean().optional().describe("Whether expense is billable to a customer")
+    parameters: z5.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      account_id: entityIdSchema.describe("Expense account ID"),
+      paid_through_account_id: entityIdSchema.describe(
+        "Payment account ID (bank/cash/credit card)"
+      ),
+      date: dateSchema.describe("Expense date (YYYY-MM-DD)"),
+      amount: moneySchema.describe("Expense amount (max 999,999,999.99, 2 decimal places)"),
+      description: z5.string().max(500).optional().describe("Description of the expense"),
+      reference_number: z5.string().max(100).optional().describe("Reference number"),
+      customer_id: entityIdSchema.optional().describe("Customer ID if billable"),
+      vendor_id: entityIdSchema.optional().describe("Vendor ID"),
+      is_billable: z5.boolean().optional().describe("Whether expense is billable to a customer")
     }),
     annotations: {
       title: "Create Expense",
@@ -1290,11 +1511,14 @@ Use this expense_id to add receipts.`;
     name: "add_expense_receipt",
     description: `Upload a receipt attachment to an expense.
 Supported file types: PDF, PNG, JPG, JPEG, GIF, DOC, DOCX, XLS, XLSX.
-Use this to attach scanned receipts or invoice images.`,
-    parameters: z4.object({
-      organization_id: z4.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      expense_id: z4.string().describe("Expense ID to attach receipt to"),
-      file_path: z4.string().describe("Full local file path to the receipt")
+Use this to attach scanned receipts or invoice images.
+Files must be in allowed directories and under 10MB.`,
+    parameters: z5.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      expense_id: entityIdSchema.describe("Expense ID to attach receipt to"),
+      file_path: z5.string().max(500).describe("Full local file path to the receipt")
     }),
     annotations: {
       title: "Add Expense Receipt",
@@ -1320,9 +1544,11 @@ Use this to attach scanned receipts or invoice images.`,
     name: "get_expense_receipt",
     description: `Get receipt/attachment information for an expense.
 Returns details about any files attached to the expense.`,
-    parameters: z4.object({
-      organization_id: z4.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      expense_id: z4.string().describe("Expense ID")
+    parameters: z5.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      expense_id: entityIdSchema.describe("Expense ID")
     }),
     annotations: {
       title: "Get Expense Receipt",
@@ -1357,9 +1583,11 @@ ${i + 1}. ${doc.file_name} (${doc.file_size_formatted || "Unknown"})`;
     name: "delete_expense_receipt",
     description: `Delete receipt/attachment from an expense.
 Removes the file association from the expense.`,
-    parameters: z4.object({
-      organization_id: z4.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      expense_id: z4.string().describe("Expense ID")
+    parameters: z5.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      expense_id: entityIdSchema.describe("Expense ID")
     }),
     annotations: {
       title: "Delete Expense Receipt",
@@ -1382,12 +1610,12 @@ Receipt removed from expense \`${args.expense_id}\`.`;
 }
 
 // src/tools/bills.ts
-import { z as z5 } from "zod";
-var billLineItemSchema = z5.object({
-  account_id: z5.string().describe("Account ID from chart of accounts"),
-  description: z5.string().optional().describe("Description for this line item"),
-  amount: z5.number().positive().describe("Amount for this line item"),
-  tax_id: z5.string().optional().describe("Tax ID if applicable")
+import { z as z6 } from "zod";
+var billLineItemSchema = z6.object({
+  account_id: z6.string().describe("Account ID from chart of accounts"),
+  description: z6.string().optional().describe("Description for this line item"),
+  amount: z6.number().positive().describe("Amount for this line item"),
+  tax_id: z6.string().optional().describe("Tax ID if applicable")
 });
 function registerBillTools(server2) {
   server2.addTool({
@@ -1395,15 +1623,17 @@ function registerBillTools(server2) {
     description: `List all bills (accounts payable).
 Supports filtering by date, vendor, and status.
 Returns bill details with vendor, amount, and due date.`,
-    parameters: z5.object({
-      organization_id: z5.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      date_start: z5.string().optional().describe("Start date (YYYY-MM-DD)"),
-      date_end: z5.string().optional().describe("End date (YYYY-MM-DD)"),
-      vendor_id: z5.string().optional().describe("Filter by vendor"),
-      status: z5.enum(["draft", "open", "overdue", "paid", "void", "partially_paid"]).optional().describe("Filter by status"),
-      sort_column: z5.enum(["date", "due_date", "total", "created_time"]).optional(),
-      page: z5.number().int().positive().optional(),
-      per_page: z5.number().int().min(1).max(200).optional()
+    parameters: z6.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      date_start: z6.string().optional().describe("Start date (YYYY-MM-DD)"),
+      date_end: z6.string().optional().describe("End date (YYYY-MM-DD)"),
+      vendor_id: z6.string().optional().describe("Filter by vendor"),
+      status: z6.enum(["draft", "open", "overdue", "paid", "void", "partially_paid"]).optional().describe("Filter by status"),
+      sort_column: z6.enum(["date", "due_date", "total", "created_time"]).optional(),
+      page: z6.number().int().positive().optional(),
+      per_page: z6.number().int().min(1).max(200).optional()
     }),
     annotations: {
       title: "List Bills",
@@ -1419,11 +1649,7 @@ Returns bill details with vendor, amount, and due date.`,
       if (args.sort_column) queryParams.sort_column = args.sort_column;
       if (args.page) queryParams.page = args.page.toString();
       if (args.per_page) queryParams.per_page = args.per_page.toString();
-      const result = await zohoGet(
-        "/bills",
-        args.organization_id,
-        queryParams
-      );
+      const result = await zohoGet("/bills", args.organization_id, queryParams);
       if (!result.ok) {
         return result.errorMessage || "Failed to list bills";
       }
@@ -1449,9 +1675,11 @@ ${formatted}`;
     name: "get_bill",
     description: `Get detailed information about a specific bill.
 Returns full bill details including line items and vendor info.`,
-    parameters: z5.object({
-      organization_id: z5.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      bill_id: z5.string().describe("Bill ID")
+    parameters: z6.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      bill_id: z6.string().describe("Bill ID")
     }),
     annotations: {
       title: "Get Bill Details",
@@ -1459,10 +1687,7 @@ Returns full bill details including line items and vendor info.`,
       openWorldHint: true
     },
     execute: async (args) => {
-      const result = await zohoGet(
-        `/bills/${args.bill_id}`,
-        args.organization_id
-      );
+      const result = await zohoGet(`/bills/${args.bill_id}`, args.organization_id);
       if (!result.ok) {
         return result.errorMessage || "Failed to get bill";
       }
@@ -1500,15 +1725,17 @@ ${i + 1}. ${item.account_name || item.account_id} - ${bill.currency_code || ""} 
     description: `Create a new bill (accounts payable).
 Use list_contacts to find vendor_id values.
 Use list_accounts to find account_id values for line items.`,
-    parameters: z5.object({
-      organization_id: z5.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      vendor_id: z5.string().describe("Vendor ID"),
-      bill_number: z5.string().optional().describe("Bill/Invoice number from vendor"),
-      date: z5.string().describe("Bill date (YYYY-MM-DD)"),
-      due_date: z5.string().optional().describe("Payment due date (YYYY-MM-DD)"),
-      reference_number: z5.string().optional().describe("Reference number"),
-      notes: z5.string().optional().describe("Notes"),
-      line_items: z5.array(billLineItemSchema).min(1).describe("Array of line items")
+    parameters: z6.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      vendor_id: z6.string().describe("Vendor ID"),
+      bill_number: z6.string().optional().describe("Bill/Invoice number from vendor"),
+      date: z6.string().describe("Bill date (YYYY-MM-DD)"),
+      due_date: z6.string().optional().describe("Payment due date (YYYY-MM-DD)"),
+      reference_number: z6.string().optional().describe("Reference number"),
+      notes: z6.string().optional().describe("Notes"),
+      line_items: z6.array(billLineItemSchema).min(1).describe("Array of line items")
     }),
     annotations: {
       title: "Create Bill",
@@ -1548,10 +1775,12 @@ Use this bill_id to add attachments.`;
     description: `Upload a file attachment to a bill.
 Supported file types: PDF, PNG, JPG, JPEG, GIF, DOC, DOCX, XLS, XLSX.
 Use this to attach vendor invoices or supporting documents.`,
-    parameters: z5.object({
-      organization_id: z5.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      bill_id: z5.string().describe("Bill ID to attach file to"),
-      file_path: z5.string().describe("Full local file path to the attachment")
+    parameters: z6.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      bill_id: z6.string().describe("Bill ID to attach file to"),
+      file_path: z6.string().describe("Full local file path to the attachment")
     }),
     annotations: {
       title: "Add Bill Attachment",
@@ -1577,9 +1806,11 @@ Use this to attach vendor invoices or supporting documents.`,
     name: "get_bill_attachment",
     description: `Get attachment information for a bill.
 Returns details about any files attached to the bill.`,
-    parameters: z5.object({
-      organization_id: z5.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      bill_id: z5.string().describe("Bill ID")
+    parameters: z6.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      bill_id: z6.string().describe("Bill ID")
     }),
     annotations: {
       title: "Get Bill Attachment",
@@ -1614,9 +1845,11 @@ ${i + 1}. ${doc.file_name} (${doc.file_size_formatted || "Unknown"})`;
     name: "delete_bill_attachment",
     description: `Delete attachment from a bill.
 Removes the file association from the bill.`,
-    parameters: z5.object({
-      organization_id: z5.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      bill_id: z5.string().describe("Bill ID")
+    parameters: z6.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      bill_id: z6.string().describe("Bill ID")
     }),
     annotations: {
       title: "Delete Bill Attachment",
@@ -1639,22 +1872,24 @@ Attachment removed from bill \`${args.bill_id}\`.`;
 }
 
 // src/tools/invoices.ts
-import { z as z6 } from "zod";
+import { z as z7 } from "zod";
 function registerInvoiceTools(server2) {
   server2.addTool({
     name: "list_invoices",
     description: `List all customer invoices (accounts receivable).
 Supports filtering by date, customer, and status.
 Returns invoice details with customer, amount, and due date.`,
-    parameters: z6.object({
-      organization_id: z6.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      date_start: z6.string().optional().describe("Start date (YYYY-MM-DD)"),
-      date_end: z6.string().optional().describe("End date (YYYY-MM-DD)"),
-      customer_id: z6.string().optional().describe("Filter by customer"),
-      status: z6.enum(["draft", "sent", "overdue", "paid", "void", "partially_paid"]).optional().describe("Filter by status"),
-      sort_column: z6.enum(["date", "due_date", "total", "created_time"]).optional(),
-      page: z6.number().int().positive().optional(),
-      per_page: z6.number().int().min(1).max(200).optional()
+    parameters: z7.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      date_start: z7.string().optional().describe("Start date (YYYY-MM-DD)"),
+      date_end: z7.string().optional().describe("End date (YYYY-MM-DD)"),
+      customer_id: z7.string().optional().describe("Filter by customer"),
+      status: z7.enum(["draft", "sent", "overdue", "paid", "void", "partially_paid"]).optional().describe("Filter by status"),
+      sort_column: z7.enum(["date", "due_date", "total", "created_time"]).optional(),
+      page: z7.number().int().positive().optional(),
+      per_page: z7.number().int().min(1).max(200).optional()
     }),
     annotations: {
       title: "List Invoices",
@@ -1700,9 +1935,11 @@ ${formatted}`;
     name: "get_invoice",
     description: `Get detailed information about a specific invoice.
 Returns full invoice details including line items and customer info.`,
-    parameters: z6.object({
-      organization_id: z6.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      invoice_id: z6.string().describe("Invoice ID")
+    parameters: z7.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      invoice_id: z7.string().describe("Invoice ID")
     }),
     annotations: {
       title: "Get Invoice Details",
@@ -1753,10 +1990,12 @@ ${i + 1}. ${item.name || item.description || "Item"} - ${invoice.currency_code |
     description: `Upload a file attachment to an invoice.
 Supported file types: PDF, PNG, JPG, JPEG, GIF, DOC, DOCX, XLS, XLSX.
 Use this to attach supporting documents to invoices.`,
-    parameters: z6.object({
-      organization_id: z6.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      invoice_id: z6.string().describe("Invoice ID to attach file to"),
-      file_path: z6.string().describe("Full local file path to the attachment")
+    parameters: z7.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      invoice_id: z7.string().describe("Invoice ID to attach file to"),
+      file_path: z7.string().describe("Full local file path to the attachment")
     }),
     annotations: {
       title: "Add Invoice Attachment",
@@ -1782,9 +2021,11 @@ Use this to attach supporting documents to invoices.`,
     name: "get_invoice_attachment",
     description: `Get attachment information for an invoice.
 Returns details about any files attached to the invoice.`,
-    parameters: z6.object({
-      organization_id: z6.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      invoice_id: z6.string().describe("Invoice ID")
+    parameters: z7.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      invoice_id: z7.string().describe("Invoice ID")
     }),
     annotations: {
       title: "Get Invoice Attachment",
@@ -1819,9 +2060,11 @@ ${i + 1}. ${doc.file_name} (${doc.file_size_formatted || "Unknown"})`;
     name: "delete_invoice_attachment",
     description: `Delete attachment from an invoice.
 Removes the file association from the invoice.`,
-    parameters: z6.object({
-      organization_id: z6.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      invoice_id: z6.string().describe("Invoice ID")
+    parameters: z7.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      invoice_id: z7.string().describe("Invoice ID")
     }),
     annotations: {
       title: "Delete Invoice Attachment",
@@ -1844,21 +2087,23 @@ Attachment removed from invoice \`${args.invoice_id}\`.`;
 }
 
 // src/tools/contacts.ts
-import { z as z7 } from "zod";
+import { z as z8 } from "zod";
 function registerContactTools(server2) {
   server2.addTool({
     name: "list_contacts",
     description: `List all contacts (customers and vendors).
 Supports filtering by contact type (customer or vendor).
 Use this to find contact_id values for bills, invoices, and expenses.`,
-    parameters: z7.object({
-      organization_id: z7.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      contact_type: z7.enum(["customer", "vendor"]).optional().describe("Filter by contact type"),
-      status: z7.enum(["active", "inactive", "crm", "all"]).optional().describe("Filter by status"),
-      search_text: z7.string().optional().describe("Search by name or company"),
-      sort_column: z7.enum(["contact_name", "company_name", "created_time"]).optional(),
-      page: z7.number().int().positive().optional(),
-      per_page: z7.number().int().min(1).max(200).optional()
+    parameters: z8.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      contact_type: z8.enum(["customer", "vendor"]).optional().describe("Filter by contact type"),
+      status: z8.enum(["active", "inactive", "crm", "all"]).optional().describe("Filter by status"),
+      search_text: z8.string().optional().describe("Search by name or company"),
+      sort_column: z8.enum(["contact_name", "company_name", "created_time"]).optional(),
+      page: z8.number().int().positive().optional(),
+      per_page: z8.number().int().min(1).max(200).optional()
     }),
     annotations: {
       title: "List Contacts",
@@ -1902,9 +2147,11 @@ ${formatted}`;
     name: "get_contact",
     description: `Get detailed information about a specific contact.
 Returns full contact details including payment terms and currency settings.`,
-    parameters: z7.object({
-      organization_id: z7.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      contact_id: z7.string().describe("Contact ID")
+    parameters: z8.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      contact_id: z8.string().describe("Contact ID")
     }),
     annotations: {
       title: "Get Contact Details",
@@ -1939,17 +2186,19 @@ Returns full contact details including payment terms and currency settings.`,
 }
 
 // src/tools/bank-accounts.ts
-import { z as z8 } from "zod";
+import { z as z9 } from "zod";
 function registerBankAccountTools(server2) {
   server2.addTool({
     name: "list_bank_accounts",
     description: `List all bank accounts in Zoho Books.
 Returns bank account details with name, type, and balance.
 These are the accounts linked in Zoho Books, not live bank data.`,
-    parameters: z8.object({
-      organization_id: z8.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      filter_by: z8.enum(["Status.All", "Status.Active", "Status.Inactive"]).optional().describe("Filter by status"),
-      sort_column: z8.enum(["account_name", "account_type"]).optional()
+    parameters: z9.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      filter_by: z9.enum(["Status.All", "Status.Active", "Status.Inactive"]).optional().describe("Filter by status"),
+      sort_column: z9.enum(["account_name", "account_type"]).optional()
     }),
     annotations: {
       title: "List Bank Accounts",
@@ -1974,10 +2223,12 @@ These are the accounts linked in Zoho Books, not live bank data.`,
       }
       const formatted = accounts.map((acc, index) => {
         const balance = acc.balance !== void 0 ? ` | Balance: ${acc.currency_code || ""} ${acc.balance}` : "";
+        const digitsOnly = acc.account_number?.replace(/\D/g, "");
+        const maskedAccount = digitsOnly && digitsOnly.length >= 4 ? `****${digitsOnly.slice(-4)}` : "N/A";
         return `${index + 1}. **${acc.account_name}** (${acc.account_type})
    - Account ID: \`${acc.account_id}\`
    - Bank: ${acc.bank_name || "N/A"}
-   - Account Number: ${acc.account_number ? `****${acc.account_number.slice(-4)}` : "N/A"}
+   - Account Number: ${maskedAccount}
    - Active: ${acc.is_active ? "Yes" : "No"}${balance}`;
       }).join("\n\n");
       return `**Bank Accounts** (${accounts.length} accounts)
@@ -1989,9 +2240,11 @@ ${formatted}`;
     name: "get_bank_account",
     description: `Get detailed information about a specific bank account.
 Returns full bank account details including routing number and balance.`,
-    parameters: z8.object({
-      organization_id: z8.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      account_id: z8.string().describe("Bank account ID")
+    parameters: z9.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      account_id: entityIdSchema.describe("Bank account ID")
     }),
     annotations: {
       title: "Get Bank Account Details",
@@ -2010,6 +2263,10 @@ Returns full bank account details including routing number and balance.`,
       if (!account) {
         return "Bank account not found";
       }
+      const accountDigits = account.account_number?.replace(/\D/g, "");
+      const maskedAccount = accountDigits && accountDigits.length >= 4 ? `****${accountDigits.slice(-4)}` : "N/A";
+      const routingDigits = account.routing_number?.replace(/\D/g, "");
+      const maskedRouting = routingDigits && routingDigits.length >= 4 ? `****${routingDigits.slice(-4)}` : "N/A";
       return `**Bank Account Details**
 
 - **Account ID**: \`${account.account_id}\`
@@ -2017,8 +2274,8 @@ Returns full bank account details including routing number and balance.`,
 - **Type**: ${account.account_type}
 - **Code**: ${account.account_code || "N/A"}
 - **Bank Name**: ${account.bank_name || "N/A"}
-- **Account Number**: ${account.account_number ? `****${account.account_number.slice(-4)}` : "N/A"}
-- **Routing Number**: ${account.routing_number ? `****${account.routing_number.slice(-4)}` : "N/A"}
+- **Account Number**: ${maskedAccount}
+- **Routing Number**: ${maskedRouting}
 - **Currency**: ${account.currency_code || "N/A"}
 - **Balance**: ${account.currency_code || ""} ${account.balance || 0}
 - **Active**: ${account.is_active ? "Yes" : "No"}`;
@@ -2029,15 +2286,17 @@ Returns full bank account details including routing number and balance.`,
     description: `List bank transactions in Zoho Books.
 Returns transactions recorded in Zoho Books for bank reconciliation.
 These are transactions imported/entered in Zoho, not live bank feeds.`,
-    parameters: z8.object({
-      organization_id: z8.string().optional().describe("Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"),
-      account_id: z8.string().describe("Bank account ID"),
-      date_start: z8.string().optional().describe("Start date (YYYY-MM-DD)"),
-      date_end: z8.string().optional().describe("End date (YYYY-MM-DD)"),
-      status: z8.enum(["All", "uncategorized", "categorized", "excluded"]).optional(),
-      sort_column: z8.enum(["date", "amount"]).optional(),
-      page: z8.number().int().positive().optional(),
-      per_page: z8.number().int().min(1).max(200).optional()
+    parameters: z9.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      account_id: entityIdSchema.describe("Bank account ID"),
+      date_start: optionalDateSchema.describe("Start date (YYYY-MM-DD)"),
+      date_end: optionalDateSchema.describe("End date (YYYY-MM-DD)"),
+      status: z9.enum(["All", "uncategorized", "categorized", "excluded"]).optional(),
+      sort_column: z9.enum(["date", "amount"]).optional(),
+      page: z9.number().int().positive().optional(),
+      per_page: z9.number().int().min(1).max(200).optional()
     }),
     annotations: {
       title: "List Bank Transactions",
