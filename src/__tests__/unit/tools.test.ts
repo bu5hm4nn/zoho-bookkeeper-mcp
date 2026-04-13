@@ -615,6 +615,27 @@ describe("MCP Tools", () => {
           }
         )
       })
+
+      it("returns API errors when matching fails", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: false,
+          errorMessage: "Transaction is already matched",
+        })
+
+        const tool = tools.get("match_bank_transaction")!
+        const result = await tool.execute({
+          account_id: "bank-acc-1",
+          transaction_id: "banktx-123",
+          transactions_to_be_matched: [
+            {
+              transaction_id: "journal-123",
+              transaction_type: "journal",
+            },
+          ],
+        })
+
+        expect(result).toBe("Transaction is already matched")
+      })
     })
 
     describe("unmatch_bank_transaction", () => {
@@ -640,6 +661,21 @@ describe("MCP Tools", () => {
             account_id: "bank-acc-1",
           }
         )
+      })
+
+      it("returns API errors when unmatching fails", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: false,
+          errorMessage: "Transaction cannot be unmatched",
+        })
+
+        const tool = tools.get("unmatch_bank_transaction")!
+        const result = await tool.execute({
+          account_id: "bank-acc-1",
+          transaction_id: "banktx-123",
+        })
+
+        expect(result).toBe("Transaction cannot be unmatched")
       })
     })
   })
