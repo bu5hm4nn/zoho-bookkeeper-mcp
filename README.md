@@ -27,7 +27,7 @@ This custom MCP server provides:
 - **OAuth 2.0** with automatic token refresh
 - **Health checks** for container orchestration
 
-## Available Tools (37 total)
+## Available Tools (40 total)
 
 | Category | Tools | Description |
 |----------|-------|-------------|
@@ -38,7 +38,7 @@ This custom MCP server provides:
 | **Bills** | 6 | Full CRUD + attachments |
 | **Invoices** | 5 | List/get + attachments |
 | **Contacts** | 2 | List/get customers and vendors |
-| **Bank Accounts** | 3 | List accounts and transactions |
+| **Bank Accounts** | 6 | List accounts/transactions + match and unmatch reconciliation items |
 
 ## Prerequisites
 
