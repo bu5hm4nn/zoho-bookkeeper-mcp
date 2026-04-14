@@ -15,6 +15,7 @@ vi.mock("../../api/client.js", () => ({
 import { zohoListOrganizations, zohoGet, zohoPost } from "../../api/client.js"
 import { registerOrganizationTools } from "../../tools/organizations.js"
 import { registerContactTools } from "../../tools/contacts.js"
+import { registerVendorTools } from "../../tools/vendors.js"
 import { registerChartOfAccountsTools } from "../../tools/chart-of-accounts.js"
 import { registerBankAccountTools } from "../../tools/bank-accounts.js"
 
@@ -285,6 +286,199 @@ describe("MCP Tools", () => {
         const result = await tool.execute({ contact_id: "contact-123" })
 
         expect(result).toBe("Contact not found")
+      })
+    })
+  })
+
+  describe("Vendor Tools", () => {
+    beforeEach(() => {
+      registerVendorTools(server)
+    })
+
+    describe("list_vendors", () => {
+      it("lists vendors successfully", async () => {
+        mockZohoGet.mockResolvedValue({
+          ok: true,
+          data: {
+            contacts: [
+              {
+                contact_id: "vendor-123",
+                contact_name: "Office Depot",
+                contact_type: "vendor",
+                company_name: "Office Depot GmbH",
+                email: "ap@officedepot.example",
+                phone: "555-1000",
+                status: "active",
+              },
+            ],
+          },
+        })
+
+        const tool = tools.get("list_vendors")!
+        const result = await tool.execute({})
+
+        expect(result).toContain("Office Depot")
+        expect(result).toContain("vendor-123")
+        expect(result).toContain("Vendors")
+      })
+
+      it("passes vendor query parameters correctly", async () => {
+        mockZohoGet.mockResolvedValue({
+          ok: true,
+          data: { contacts: [] },
+        })
+
+        const tool = tools.get("list_vendors")!
+        await tool.execute({
+          status: "active",
+          search_text: "office",
+          sort_column: "contact_name",
+          page: 2,
+          per_page: 25,
+        })
+
+        expect(mockZohoGet).toHaveBeenCalledWith(
+          "/contacts",
+          undefined,
+          expect.objectContaining({
+            contact_type: "vendor",
+            status: "active",
+            search_text: "office",
+            sort_column: "contact_name",
+            page: "2",
+            per_page: "25",
+          })
+        )
+      })
+
+      it("handles vendor list API errors", async () => {
+        mockZohoGet.mockResolvedValue({
+          ok: false,
+          errorMessage: "Vendor list unavailable",
+        })
+
+        const tool = tools.get("list_vendors")!
+        const result = await tool.execute({})
+
+        expect(result).toBe("Vendor list unavailable")
+      })
+    })
+
+    describe("get_vendor", () => {
+      it("gets vendor details successfully", async () => {
+        mockZohoGet.mockResolvedValue({
+          ok: true,
+          data: {
+            contact: {
+              contact_id: "vendor-123",
+              contact_name: "Office Depot",
+              contact_type: "vendor",
+              company_name: "Office Depot GmbH",
+              email: "ap@officedepot.example",
+              phone: "555-1000",
+              status: "active",
+              payment_terms: 30,
+              currency_code: "USD",
+              notes: "Preferred office supplier",
+              billing_address: {
+                address: "123 Supply St",
+                city: "Berlin",
+                country: "Germany",
+              },
+            },
+          },
+        })
+
+        const tool = tools.get("get_vendor")!
+        const result = await tool.execute({ vendor_id: "vendor-123" })
+
+        expect(result).toContain("Office Depot")
+        expect(result).toContain("30 days")
+        expect(result).toContain("123 Supply St")
+      })
+
+      it("rejects non-vendor contacts", async () => {
+        mockZohoGet.mockResolvedValue({
+          ok: true,
+          data: {
+            contact: {
+              contact_id: "contact-123",
+              contact_name: "Customer One",
+              contact_type: "customer",
+              status: "active",
+            },
+          },
+        })
+
+        const tool = tools.get("get_vendor")!
+        const result = await tool.execute({ vendor_id: "contact-123" })
+
+        expect(result).toBe("Contact is not a vendor")
+      })
+    })
+
+    describe("create_vendor", () => {
+      it("creates a vendor successfully", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: true,
+          data: {
+            contact: {
+              contact_id: "vendor-123",
+              contact_name: "Office Depot",
+              contact_type: "vendor",
+              company_name: "Office Depot GmbH",
+              email: "ap@officedepot.example",
+              phone: "555-1000",
+              status: "active",
+            },
+          },
+        })
+
+        const tool = tools.get("create_vendor")!
+        const result = await tool.execute({
+          contact_name: "Office Depot",
+          company_name: "Office Depot GmbH",
+          email: "ap@officedepot.example",
+          phone: "555-1000",
+          currency_id: "currency-1",
+          payment_terms: 30,
+          billing_address: {
+            address: "123 Supply St",
+            city: "Berlin",
+            country: "Germany",
+          },
+          notes: "Preferred office supplier",
+        })
+
+        expect(result).toContain("Vendor Created Successfully")
+        expect(result).toContain("vendor-123")
+        expect(mockZohoPost).toHaveBeenCalledWith("/contacts", undefined, {
+          contact_name: "Office Depot",
+          contact_type: "vendor",
+          company_name: "Office Depot GmbH",
+          email: "ap@officedepot.example",
+          phone: "555-1000",
+          currency_id: "currency-1",
+          payment_terms: 30,
+          billing_address: {
+            address: "123 Supply St",
+            city: "Berlin",
+            country: "Germany",
+          },
+          notes: "Preferred office supplier",
+        })
+      })
+
+      it("returns API errors when vendor creation fails", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: false,
+          errorMessage: "Vendor already exists",
+        })
+
+        const tool = tools.get("create_vendor")!
+        const result = await tool.execute({ contact_name: "Office Depot" })
+
+        expect(result).toBe("Vendor already exists")
       })
     })
   })
