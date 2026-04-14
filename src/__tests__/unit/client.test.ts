@@ -240,6 +240,31 @@ describe("Zoho API Client", () => {
         expect.objectContaining({ method: "POST" })
       )
     })
+
+    it("supports POST query parameters without requiring a body", async () => {
+      const mockResponse = { code: 0, message: "The transaction has been unmatched." }
+      global.fetch = vi
+        .fn()
+        .mockResolvedValue(new Response(JSON.stringify(mockResponse), { status: 200 }))
+
+      const result = await zohoPost("/banktransactions/banktx-123/unmatch", "org-123", undefined, {
+        account_id: "bank-acc-1",
+      })
+
+      expect(result.ok).toBe(true)
+
+      const callUrl = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+      expect(callUrl).toContain("/banktransactions/banktx-123/unmatch")
+      expect(callUrl).toContain("organization_id=org-123")
+      expect(callUrl).toContain("account_id=bank-acc-1")
+
+      expect(fetch).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          method: "POST",
+        })
+      )
+    })
   })
 
   describe("zohoPut", () => {

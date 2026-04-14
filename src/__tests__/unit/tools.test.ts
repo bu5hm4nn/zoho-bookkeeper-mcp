@@ -16,6 +16,7 @@ import { zohoListOrganizations, zohoGet, zohoPost } from "../../api/client.js"
 import { registerOrganizationTools } from "../../tools/organizations.js"
 import { registerContactTools } from "../../tools/contacts.js"
 import { registerChartOfAccountsTools } from "../../tools/chart-of-accounts.js"
+import { registerBankAccountTools } from "../../tools/bank-accounts.js"
 
 const mockZohoListOrganizations = vi.mocked(zohoListOrganizations)
 const mockZohoGet = vi.mocked(zohoGet)
@@ -468,6 +469,213 @@ describe("MCP Tools", () => {
         const result = await tool.execute({ account_id: "acc-123" })
 
         expect(result).toBe("No transactions found for this account.")
+      })
+    })
+  })
+
+  describe("Bank Account Tools", () => {
+    beforeEach(() => {
+      registerBankAccountTools(server)
+    })
+
+    describe("list_bank_transactions", () => {
+      it("lists bank transactions successfully", async () => {
+        mockZohoGet.mockResolvedValue({
+          ok: true,
+          data: {
+            banktransactions: [
+              {
+                transaction_id: "banktx-123",
+                date: "2024-01-15",
+                amount: 150,
+                transaction_type: "deposit",
+                status: "matched",
+                source: "manually_added",
+                payee: "Mercury",
+                reference_number: "REF-123",
+                description: "Deposit",
+                currency_code: "USD",
+                debit_or_credit: "credit",
+              },
+            ],
+          },
+        })
+
+        const tool = tools.get("list_bank_transactions")!
+        const result = await tool.execute({
+          account_id: "bank-acc-1",
+          status: "matched",
+        })
+
+        expect(result).toContain("banktx-123")
+        expect(result).toContain("matched")
+        expect(result).toContain("manually_added")
+        expect(mockZohoGet).toHaveBeenCalledWith(
+          "/banktransactions",
+          undefined,
+          expect.objectContaining({
+            account_id: "bank-acc-1",
+            status: "matched",
+          })
+        )
+      })
+    })
+
+    describe("get_bank_transaction_matches", () => {
+      it("lists candidate matches successfully", async () => {
+        mockZohoGet.mockResolvedValue({
+          ok: true,
+          data: {
+            matching_transactions: [
+              {
+                transaction_id: "match-123",
+                date: "2024-01-15",
+                transaction_type: "journal",
+                reference_number: "J-001",
+                amount: 150,
+                debit_or_credit: "credit",
+                transaction_number: "JRN-001",
+                contact_name: "N/A",
+                is_best_match: true,
+              },
+            ],
+          },
+        })
+
+        const tool = tools.get("get_bank_transaction_matches")!
+        const result = await tool.execute({
+          account_id: "bank-acc-1",
+          transaction_id: "banktx-123",
+          show_all_transactions: true,
+        })
+
+        expect(result).toContain("Candidate Matches")
+        expect(result).toContain("match-123")
+        expect(result).toContain("Best match")
+        expect(mockZohoGet).toHaveBeenCalledWith(
+          "/banktransactions/uncategorized/banktx-123/match",
+          undefined,
+          expect.objectContaining({
+            account_id: "bank-acc-1",
+            show_all_transactions: "true",
+          })
+        )
+      })
+
+      it("handles no candidate matches", async () => {
+        mockZohoGet.mockResolvedValue({
+          ok: true,
+          data: { matching_transactions: [] },
+        })
+
+        const tool = tools.get("get_bank_transaction_matches")!
+        const result = await tool.execute({
+          account_id: "bank-acc-1",
+          transaction_id: "banktx-123",
+        })
+
+        expect(result).toContain("No candidate matches found")
+      })
+    })
+
+    describe("match_bank_transaction", () => {
+      it("matches a bank transaction successfully", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: true,
+          data: { message: "The transaction has been matched." },
+        })
+
+        const tool = tools.get("match_bank_transaction")!
+        const result = await tool.execute({
+          account_id: "bank-acc-1",
+          transaction_id: "banktx-123",
+          transactions_to_be_matched: [
+            {
+              transaction_id: "journal-123",
+              transaction_type: "journal",
+            },
+          ],
+        })
+
+        expect(result).toContain("Bank transaction matched")
+        expect(result).toContain("banktx-123")
+        expect(mockZohoPost).toHaveBeenCalledWith(
+          "/banktransactions/uncategorized/banktx-123/match",
+          undefined,
+          {
+            transactions_to_be_matched: [
+              {
+                transaction_id: "journal-123",
+                transaction_type: "journal",
+              },
+            ],
+          },
+          {
+            account_id: "bank-acc-1",
+          }
+        )
+      })
+
+      it("returns API errors when matching fails", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: false,
+          errorMessage: "Transaction is already matched",
+        })
+
+        const tool = tools.get("match_bank_transaction")!
+        const result = await tool.execute({
+          account_id: "bank-acc-1",
+          transaction_id: "banktx-123",
+          transactions_to_be_matched: [
+            {
+              transaction_id: "journal-123",
+              transaction_type: "journal",
+            },
+          ],
+        })
+
+        expect(result).toBe("Transaction is already matched")
+      })
+    })
+
+    describe("unmatch_bank_transaction", () => {
+      it("unmatches a bank transaction successfully", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: true,
+          data: { message: "The transaction has been unmatched." },
+        })
+
+        const tool = tools.get("unmatch_bank_transaction")!
+        const result = await tool.execute({
+          account_id: "bank-acc-1",
+          transaction_id: "banktx-123",
+        })
+
+        expect(result).toContain("Bank transaction unmatched")
+        expect(result).toContain("uncategorized")
+        expect(mockZohoPost).toHaveBeenCalledWith(
+          "/banktransactions/banktx-123/unmatch",
+          undefined,
+          undefined,
+          {
+            account_id: "bank-acc-1",
+          }
+        )
+      })
+
+      it("returns API errors when unmatching fails", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: false,
+          errorMessage: "Transaction cannot be unmatched",
+        })
+
+        const tool = tools.get("unmatch_bank_transaction")!
+        const result = await tool.execute({
+          account_id: "bank-acc-1",
+          transaction_id: "banktx-123",
+        })
+
+        expect(result).toBe("Transaction cannot be unmatched")
       })
     })
   })

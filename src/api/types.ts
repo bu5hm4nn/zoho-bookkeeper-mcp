@@ -248,12 +248,31 @@ export interface BankTransaction {
   amount: number
   transaction_type: string
   status: string
+  source?: string
+  account_id?: string
+  account_name?: string
   reference_number?: string
   description?: string
   payee?: string
   currency_id?: string
   currency_code?: string
+  offset_account_name?: string
+  imported_transaction_id?: string
+  is_rule_exist?: boolean
+  rule_details?: string[]
   debit_or_credit: "debit" | "credit"
+}
+
+export interface MatchingTransaction {
+  transaction_id: string
+  date: string
+  transaction_type: string
+  reference_number?: string
+  amount: number
+  debit_or_credit: "debit" | "credit"
+  transaction_number?: string
+  contact_name?: string
+  is_best_match?: boolean
 }
 
 // Attachment

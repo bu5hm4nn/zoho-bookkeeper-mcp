@@ -55,6 +55,7 @@ You do NOT need to call list_organizations first - just use the tools directly.
 ### Contacts & Bank Accounts
 - list_contacts, get_contact
 - list_bank_accounts, get_bank_account, list_bank_transactions
+- get_bank_transaction_matches, match_bank_transaction, unmatch_bank_transaction
 
 ### Organizations (rarely needed)
 - list_organizations, get_organization

@@ -235,9 +235,10 @@ export async function zohoGet<T>(
 export async function zohoPost<T>(
   endpoint: string,
   organizationId?: string,
-  body?: Record<string, unknown>
+  body?: Record<string, unknown>,
+  queryParams?: Record<string, string>
 ): Promise<ParsedResponse<T>> {
-  return zohoRequest<T>("POST", endpoint, organizationId, body)
+  return zohoRequest<T>("POST", endpoint, organizationId, body, queryParams)
 }
 
 /**
@@ -246,9 +247,10 @@ export async function zohoPost<T>(
 export async function zohoPut<T>(
   endpoint: string,
   organizationId?: string,
-  body?: Record<string, unknown>
+  body?: Record<string, unknown>,
+  queryParams?: Record<string, string>
 ): Promise<ParsedResponse<T>> {
-  return zohoRequest<T>("PUT", endpoint, organizationId, body)
+  return zohoRequest<T>("PUT", endpoint, organizationId, body, queryParams)
 }
 
 /**

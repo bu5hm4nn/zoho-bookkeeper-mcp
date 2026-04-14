@@ -4,13 +4,36 @@
 
 import { z } from "zod"
 import type { FastMCP } from "fastmcp"
-import { zohoGet } from "../api/client.js"
-import type { BankAccount, BankTransaction } from "../api/types.js"
+import { zohoGet, zohoPost } from "../api/client.js"
+import type { BankAccount, BankTransaction, MatchingTransaction } from "../api/types.js"
 import {
   entityIdSchema,
+  moneySchema,
   optionalDateSchema,
   optionalOrganizationIdSchema,
 } from "../utils/validation.js"
+
+const bankTransactionStatusSchema = z.enum([
+  "All",
+  "uncategorized",
+  "categorized",
+  "excluded",
+  "matched",
+  "manually_added",
+])
+
+const matchTransactionSchema = z.object({
+  transaction_id: entityIdSchema.describe(
+    "Zoho transaction ID to match against the bank transaction"
+  ),
+  transaction_type: z
+    .string()
+    .regex(/^[a-zA-Z0-9_-]+$/, "Invalid transaction type format")
+    .max(50, "Transaction type too long")
+    .describe(
+      "Zoho transaction type for the match candidate (for example deposit, transfer_fund, invoice, bill, or creditnote)"
+    ),
+})
 
 /**
  * Register bank account tools on the server
@@ -138,7 +161,8 @@ Returns full bank account details including routing number and balance.`,
     name: "list_bank_transactions",
     description: `List bank transactions in Zoho Books.
 Returns transactions recorded in Zoho Books for bank reconciliation.
-These are transactions imported/entered in Zoho, not live bank feeds.`,
+These are transactions imported/entered in Zoho, not live bank feeds.
+Bank transaction status is a reconciliation status and is separate from journal creation.`,
     parameters: z.object({
       organization_id: optionalOrganizationIdSchema.describe(
         "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
@@ -146,7 +170,7 @@ These are transactions imported/entered in Zoho, not live bank feeds.`,
       account_id: entityIdSchema.describe("Bank account ID"),
       date_start: optionalDateSchema.describe("Start date (YYYY-MM-DD)"),
       date_end: optionalDateSchema.describe("End date (YYYY-MM-DD)"),
-      status: z.enum(["All", "uncategorized", "categorized", "excluded"]).optional(),
+      status: bankTransactionStatusSchema.optional(),
       sort_column: z.enum(["date", "amount"]).optional(),
       page: z.number().int().positive().optional(),
       per_page: z.number().int().min(1).max(200).optional(),
@@ -190,6 +214,7 @@ These are transactions imported/entered in Zoho, not live bank feeds.`,
    - Transaction ID: \`${tx.transaction_id}\`
    - Type: ${tx.transaction_type}
    - Status: ${tx.status}
+   - Source: ${tx.source || "N/A"}
    - Payee: ${tx.payee || "N/A"}
    - Reference: ${tx.reference_number || "N/A"}
    - Description: ${tx.description || "N/A"}`
@@ -197,6 +222,174 @@ These are transactions imported/entered in Zoho, not live bank feeds.`,
         .join("\n\n")
 
       return `**Bank Transactions** (${transactions.length} transactions)\n\n${formatted}`
+    },
+  })
+
+  // Get candidate matches for an uncategorized bank transaction
+  server.addTool({
+    name: "get_bank_transaction_matches",
+    description: `Get candidate Zoho transactions that can be matched to an uncategorized bank transaction.
+Use this before match_bank_transaction to inspect possible matches.
+Zoho may return direct bank transactions and also invoices, bills, or credit notes that can be reconciled via derived payment/refund entries.`,
+    parameters: z.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      account_id: entityIdSchema.describe("Bank account ID"),
+      transaction_id: entityIdSchema.describe("Uncategorized bank transaction ID"),
+      transaction_type: z
+        .string()
+        .regex(/^[a-zA-Z0-9_-]+$/, "Invalid transaction type format")
+        .max(50, "Transaction type too long")
+        .optional()
+        .describe("Optional transaction type filter for candidate matches"),
+      date_start: optionalDateSchema.describe("Filter matches on or after this date (YYYY-MM-DD)"),
+      date_end: optionalDateSchema.describe("Filter matches on or before this date (YYYY-MM-DD)"),
+      amount_start: moneySchema.optional().describe("Minimum match amount"),
+      amount_end: moneySchema.optional().describe("Maximum match amount"),
+      reference_number: z.string().max(100).optional().describe("Reference number filter"),
+      show_all_transactions: z
+        .boolean()
+        .optional()
+        .describe("If true, return all candidates instead of only Zoho's best suggestions"),
+      page: z.number().int().positive().optional(),
+      per_page: z.number().int().min(1).max(200).optional(),
+    }),
+    annotations: {
+      title: "Get Bank Transaction Matches",
+      readOnlyHint: true,
+      openWorldHint: true,
+    },
+    execute: async (args) => {
+      const queryParams: Record<string, string> = {
+        account_id: args.account_id,
+      }
+      if (args.transaction_type) queryParams.transaction_type = args.transaction_type
+      if (args.date_start) queryParams.date_start = args.date_start
+      if (args.date_end) queryParams.date_end = args.date_end
+      if (args.amount_start !== undefined) queryParams.amount_start = args.amount_start.toString()
+      if (args.amount_end !== undefined) queryParams.amount_end = args.amount_end.toString()
+      if (args.reference_number) queryParams.reference_number = args.reference_number
+      if (args.show_all_transactions !== undefined) {
+        queryParams.show_all_transactions = String(args.show_all_transactions)
+      }
+      if (args.page) queryParams.page = args.page.toString()
+      if (args.per_page) queryParams.per_page = args.per_page.toString()
+
+      const result = await zohoGet<{ matching_transactions: MatchingTransaction[] }>(
+        `/banktransactions/uncategorized/${args.transaction_id}/match`,
+        args.organization_id,
+        queryParams
+      )
+
+      if (!result.ok) {
+        return result.errorMessage || "Failed to get bank transaction matches"
+      }
+
+      const matches = result.data?.matching_transactions || []
+
+      if (matches.length === 0) {
+        return `No candidate matches found for bank transaction \`${args.transaction_id}\`.`
+      }
+
+      const formatted = matches
+        .map((match, index) => {
+          const amount = match.debit_or_credit === "debit" ? `-${match.amount}` : `+${match.amount}`
+          const bestMatch = match.is_best_match ? " | Best match" : ""
+          return `${index + 1}. **${match.date}** - ${amount}${bestMatch}
+   - Transaction ID: \`${match.transaction_id}\`
+   - Type: ${match.transaction_type}
+   - Transaction Number: ${match.transaction_number || "N/A"}
+   - Contact: ${match.contact_name || "N/A"}
+   - Reference: ${match.reference_number || "N/A"}`
+        })
+        .join("\n\n")
+
+      return `**Candidate Matches** (${matches.length} found)\n\n${formatted}`
+    },
+  })
+
+  // Match an uncategorized bank transaction to existing Zoho transactions
+  server.addTool({
+    name: "match_bank_transaction",
+    description: `Match an uncategorized bank transaction to one or more existing Zoho transactions.
+Use get_bank_transaction_matches first to inspect candidates.
+This updates bank reconciliation status; creating a journal alone does not mark imported bank transactions as matched.`,
+    parameters: z.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      account_id: entityIdSchema.describe("Bank account ID"),
+      transaction_id: entityIdSchema.describe("Uncategorized bank transaction ID to reconcile"),
+      transactions_to_be_matched: z
+        .array(matchTransactionSchema)
+        .min(1, "At least one transaction must be provided")
+        .max(25, "Too many transactions to match in one request")
+        .describe("Existing Zoho transactions to match against this bank transaction"),
+    }),
+    annotations: {
+      title: "Match Bank Transaction",
+      readOnlyHint: false,
+      openWorldHint: true,
+    },
+    execute: async (args) => {
+      const result = await zohoPost<{ message?: string }>(
+        `/banktransactions/uncategorized/${args.transaction_id}/match`,
+        args.organization_id,
+        {
+          transactions_to_be_matched: args.transactions_to_be_matched,
+        },
+        {
+          account_id: args.account_id,
+        }
+      )
+
+      if (!result.ok) {
+        return result.errorMessage || "Failed to match bank transaction"
+      }
+
+      return `**Success**: Bank transaction matched
+- **Bank Transaction ID**: \`${args.transaction_id}\`
+- **Matched Transactions**: ${args.transactions_to_be_matched.length}
+- **Account ID**: \`${args.account_id}\``
+    },
+  })
+
+  // Unmatch a matched bank transaction
+  server.addTool({
+    name: "unmatch_bank_transaction",
+    description: `Unmatch a previously matched bank transaction and return it to uncategorized status.
+Use this when the wrong Zoho transaction was reconciled to a statement line.`,
+    parameters: z.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      account_id: entityIdSchema.describe("Bank account ID"),
+      transaction_id: entityIdSchema.describe("Matched bank transaction ID to unmatch"),
+    }),
+    annotations: {
+      title: "Unmatch Bank Transaction",
+      readOnlyHint: false,
+      openWorldHint: true,
+    },
+    execute: async (args) => {
+      const result = await zohoPost<{ message?: string }>(
+        `/banktransactions/${args.transaction_id}/unmatch`,
+        args.organization_id,
+        undefined,
+        {
+          account_id: args.account_id,
+        }
+      )
+
+      if (!result.ok) {
+        return result.errorMessage || "Failed to unmatch bank transaction"
+      }
+
+      return `**Success**: Bank transaction unmatched
+- **Bank Transaction ID**: \`${args.transaction_id}\`
+- **Account ID**: \`${args.account_id}\`
+- **New Status**: uncategorized`
     },
   })
 }
