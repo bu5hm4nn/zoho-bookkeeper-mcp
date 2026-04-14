@@ -44,5 +44,5 @@ commands:
 
 notes:
   auth: OAuth refresh-token flow; see README.md and src/auth/oauth.ts
-  org_id: Keep tool-facing organization_id handling consistent with current project conventions.
+  org_id: organization_id may be optional when ZOHO_ORGANIZATION_ID is configured; keep schema and wording consistent across tools.
   next_focus: vendor management for expense and bank categorization workflows.
