@@ -13,7 +13,7 @@ The official Zoho MCP service (zohomcp.com) has limitations:
 This custom MCP server provides:
 
 - Proper multipart/form-data file uploads for attachments
-- Curated set of 37 tools for bookkeeping workflows
+- Curated set of 45 tools for bookkeeping workflows
 - Auto-refreshing OAuth tokens (1-hour lifetime with 5-minute buffer)
 - Both stdio (CLI) and HTTP stream transports
 
