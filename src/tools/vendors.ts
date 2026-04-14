@@ -40,6 +40,15 @@ function formatAddress(address?: ContactAddress): string {
   return parts.length > 0 ? parts.join(", ") : "N/A"
 }
 
+function escapeMarkdownText(value?: string): string {
+  if (!value) return "N/A"
+
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/([`*_{}[\]()#+\-.!|>])/g, "\\$1")
+    .replace(/\r?\n/g, " ")
+}
+
 /**
  * Register vendor tools on the server
  */
@@ -161,7 +170,7 @@ Use this to confirm a vendor_id before creating expenses, bills, or vendor-payme
 - **Payment Terms**: ${vendor.payment_terms !== undefined ? `${vendor.payment_terms} days` : "N/A"}
 - **Currency**: ${vendor.currency_code || "N/A"}
 - **Billing Address**: ${formatAddress(vendor.billing_address)}
-- **Notes**: ${vendor.notes || "N/A"}`
+- **Notes**: ${escapeMarkdownText(vendor.notes)}`
     },
   })
 
