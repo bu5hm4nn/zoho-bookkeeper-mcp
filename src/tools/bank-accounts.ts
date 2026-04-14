@@ -508,7 +508,8 @@ Prefer matching or expense/vendor/customer payment categorization when those are
   server.addTool({
     name: "categorize_bank_transaction_as_expense",
     description: `Categorize an uncategorized bank transaction as an expense.
-Use this for routine spending that should become an expense record instead of a manual journal entry.`,
+Use this for routine spending that should become a new expense record.
+Prefer matching when the bank line should be linked to an existing Zoho transaction, and use manual journals only for exception cases that cannot be matched or categorized cleanly.`,
     parameters: z
       .object({
         organization_id: optionalOrganizationIdSchema.describe(
