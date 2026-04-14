@@ -62,18 +62,22 @@ const genericCategorizeTypeSchema = z.enum([
   "sales_return",
 ])
 
-const vendorPaymentBillSchema = z.object({
-  bill_id: entityIdSchema.describe("Bill ID to apply the payment against"),
-  amount_applied: moneySchema.describe("Amount to apply to the bill"),
-  tax_amount_withheld: moneyOrZeroSchema.optional().describe("Optional withheld tax amount"),
-})
+const vendorPaymentBillSchema = z
+  .object({
+    bill_id: entityIdSchema.describe("Bill ID to apply the payment against"),
+    amount_applied: moneySchema.describe("Amount to apply to the bill"),
+    tax_amount_withheld: moneyOrZeroSchema.optional().describe("Optional withheld tax amount"),
+  })
+  .strict()
 
-const customerPaymentInvoiceSchema = z.object({
-  invoice_id: entityIdSchema.describe("Invoice ID to apply the payment against"),
-  amount_applied: moneySchema.describe("Amount to apply to the invoice"),
-  tax_amount_withheld: moneyOrZeroSchema.optional().describe("Optional withheld tax amount"),
-  discount_amount: moneyOrZeroSchema.optional().describe("Optional invoice discount amount"),
-})
+const customerPaymentInvoiceSchema = z
+  .object({
+    invoice_id: entityIdSchema.describe("Invoice ID to apply the payment against"),
+    amount_applied: moneySchema.describe("Amount to apply to the invoice"),
+    tax_amount_withheld: moneyOrZeroSchema.optional().describe("Optional withheld tax amount"),
+    discount_amount: moneyOrZeroSchema.optional().describe("Optional invoice discount amount"),
+  })
+  .strict()
 
 /**
  * Register bank account tools on the server
