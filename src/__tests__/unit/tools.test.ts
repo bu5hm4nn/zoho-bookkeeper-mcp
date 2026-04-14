@@ -678,5 +678,235 @@ describe("MCP Tools", () => {
         expect(result).toBe("Transaction cannot be unmatched")
       })
     })
+
+    describe("categorize_bank_transaction_generic", () => {
+      it("categorizes a bank transaction generically", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: true,
+          data: { message: "The transaction(s) have been categorized." },
+        })
+
+        const tool = tools.get("categorize_bank_transaction_generic")!
+        const result = await tool.execute({
+          transaction_id: "banktx-123",
+          transaction_type: "other_income",
+          from_account_id: "income-1",
+          to_account_id: "bank-acc-1",
+          amount: 150,
+          date: "2024-01-15",
+        })
+
+        expect(result).toContain("Bank transaction categorized")
+        expect(result).toContain("other_income")
+        expect(mockZohoPost).toHaveBeenCalledWith(
+          "/banktransactions/uncategorized/banktx-123/categorize",
+          undefined,
+          expect.objectContaining({
+            transaction_type: "other_income",
+            from_account_id: "income-1",
+            to_account_id: "bank-acc-1",
+            amount: 150,
+            date: "2024-01-15",
+          })
+        )
+      })
+
+      it("returns API errors when generic categorization fails", async () => {
+        mockZohoPost.mockResolvedValue({ ok: false, errorMessage: "Invalid transaction type" })
+
+        const tool = tools.get("categorize_bank_transaction_generic")!
+        const result = await tool.execute({
+          transaction_id: "banktx-123",
+          transaction_type: "other_income",
+          from_account_id: "income-1",
+          to_account_id: "bank-acc-1",
+          amount: 150,
+          date: "2024-01-15",
+        })
+
+        expect(result).toBe("Invalid transaction type")
+      })
+    })
+
+    describe("categorize_bank_transaction_as_expense", () => {
+      it("categorizes a bank transaction as an expense", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: true,
+          data: { message: "The transaction(s) have been categorized." },
+        })
+
+        const tool = tools.get("categorize_bank_transaction_as_expense")!
+        const result = await tool.execute({
+          transaction_id: "banktx-123",
+          account_id: "expense-1",
+          paid_through_account_id: "bank-acc-1",
+          date: "2024-01-15",
+          amount: 42.5,
+          description: "Office supplies",
+        })
+
+        expect(result).toContain("categorized as expense")
+        expect(result).toContain("expense-1")
+        expect(mockZohoPost).toHaveBeenCalledWith(
+          "/banktransactions/uncategorized/banktx-123/categorize/expenses",
+          undefined,
+          expect.objectContaining({
+            account_id: "expense-1",
+            paid_through_account_id: "bank-acc-1",
+            amount: 42.5,
+          })
+        )
+      })
+
+      it("returns API errors when expense categorization fails", async () => {
+        mockZohoPost.mockResolvedValue({ ok: false, errorMessage: "Expense account required" })
+
+        const tool = tools.get("categorize_bank_transaction_as_expense")!
+        const result = await tool.execute({
+          transaction_id: "banktx-123",
+          account_id: "expense-1",
+          paid_through_account_id: "bank-acc-1",
+          date: "2024-01-15",
+          amount: 42.5,
+        })
+
+        expect(result).toBe("Expense account required")
+      })
+    })
+
+    describe("categorize_bank_transaction_as_vendor_payment", () => {
+      it("categorizes a bank transaction as a vendor payment", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: true,
+          data: { message: "The transaction(s) have been categorized." },
+        })
+
+        const tool = tools.get("categorize_bank_transaction_as_vendor_payment")!
+        const result = await tool.execute({
+          transaction_id: "banktx-123",
+          vendor_id: "vendor-1",
+          bills: [{ bill_id: "bill-1", amount_applied: 100 }],
+          amount: 100,
+          date: "2024-01-15",
+          paid_through_account_id: "bank-acc-1",
+        })
+
+        expect(result).toContain("categorized as vendor payment")
+        expect(result).toContain("vendor-1")
+        expect(mockZohoPost).toHaveBeenCalledWith(
+          "/banktransactions/uncategorized/banktx-123/categorize/vendorpayments",
+          undefined,
+          expect.objectContaining({
+            vendor_id: "vendor-1",
+            bills: [{ bill_id: "bill-1", amount_applied: 100 }],
+            amount: 100,
+          })
+        )
+      })
+
+      it("returns API errors when vendor payment categorization fails", async () => {
+        mockZohoPost.mockResolvedValue({ ok: false, errorMessage: "Bill not found" })
+
+        const tool = tools.get("categorize_bank_transaction_as_vendor_payment")!
+        const result = await tool.execute({
+          transaction_id: "banktx-123",
+          vendor_id: "vendor-1",
+          bills: [{ bill_id: "bill-1", amount_applied: 100 }],
+          amount: 100,
+          date: "2024-01-15",
+          paid_through_account_id: "bank-acc-1",
+        })
+
+        expect(result).toBe("Bill not found")
+      })
+    })
+
+    describe("categorize_bank_transaction_as_customer_payment", () => {
+      it("categorizes a bank transaction as a customer payment", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: true,
+          data: { message: "The transaction(s) have been categorized." },
+        })
+
+        const tool = tools.get("categorize_bank_transaction_as_customer_payment")!
+        const result = await tool.execute({
+          transaction_id: "banktx-123",
+          customer_id: "customer-1",
+          invoices: [{ invoice_id: "invoice-1", amount_applied: 100 }],
+          amount: 100,
+          date: "2024-01-15",
+          account_id: "bank-acc-1",
+        })
+
+        expect(result).toContain("categorized as customer payment")
+        expect(result).toContain("customer-1")
+        expect(mockZohoPost).toHaveBeenCalledWith(
+          "/banktransactions/uncategorized/banktx-123/categorize/customerpayments",
+          undefined,
+          expect.objectContaining({
+            customer_id: "customer-1",
+            invoices: [{ invoice_id: "invoice-1", amount_applied: 100 }],
+            amount: 100,
+            account_id: "bank-acc-1",
+          })
+        )
+      })
+
+      it("returns API errors when customer payment categorization fails", async () => {
+        mockZohoPost.mockResolvedValue({ ok: false, errorMessage: "Invoice not found" })
+
+        const tool = tools.get("categorize_bank_transaction_as_customer_payment")!
+        const result = await tool.execute({
+          transaction_id: "banktx-123",
+          customer_id: "customer-1",
+          invoices: [{ invoice_id: "invoice-1", amount_applied: 100 }],
+          amount: 100,
+          date: "2024-01-15",
+          account_id: "bank-acc-1",
+        })
+
+        expect(result).toBe("Invoice not found")
+      })
+    })
+
+    describe("uncategorize_bank_transaction", () => {
+      it("uncategorizes a bank transaction successfully", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: true,
+          data: { message: "Transaction(s) have been uncategorized." },
+        })
+
+        const tool = tools.get("uncategorize_bank_transaction")!
+        const result = await tool.execute({
+          account_id: "bank-acc-1",
+          transaction_id: "banktx-123",
+        })
+
+        expect(result).toContain("Bank transaction uncategorized")
+        expect(mockZohoPost).toHaveBeenCalledWith(
+          "/banktransactions/banktx-123/uncategorize",
+          undefined,
+          undefined,
+          {
+            account_id: "bank-acc-1",
+          }
+        )
+      })
+
+      it("returns API errors when uncategorization fails", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: false,
+          errorMessage: "Transaction cannot be uncategorized",
+        })
+
+        const tool = tools.get("uncategorize_bank_transaction")!
+        const result = await tool.execute({
+          account_id: "bank-acc-1",
+          transaction_id: "banktx-123",
+        })
+
+        expect(result).toBe("Transaction cannot be uncategorized")
+      })
+    })
   })
 })
