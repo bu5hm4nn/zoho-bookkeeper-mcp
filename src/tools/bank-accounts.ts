@@ -439,27 +439,29 @@ Use this when the wrong Zoho transaction was reconciled to a statement line.`,
     description: `Categorize an uncategorized bank transaction into a general Zoho bank transaction.
 Use this for deposits, transfers, owner contributions/drawings, interest income, other income, sales without invoices, expense refunds, sales returns, and similar bank-native bookkeeping flows.
 Prefer matching or expense/vendor/customer payment categorization when those are a better fit than a generic bank transaction.`,
-    parameters: z.object({
-      organization_id: optionalOrganizationIdSchema.describe(
-        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
-      ),
-      transaction_id: entityIdSchema.describe("Uncategorized bank transaction ID"),
-      transaction_type: genericCategorizeTypeSchema.describe(
-        "Generic bank transaction type to create"
-      ),
-      from_account_id: entityIdSchema.describe("Source account ID for the transaction"),
-      to_account_id: entityIdSchema.describe("Destination account ID for the transaction"),
-      amount: moneySchema.describe("Transaction amount"),
-      date: dateSchema.describe("Transaction date (YYYY-MM-DD)"),
-      payment_mode: optionalShortTextSchema.describe(
-        "Optional payment mode such as Cash or Cheque"
-      ),
-      exchange_rate: exchangeRateSchema.optional().describe("Optional exchange rate"),
-      reference_number: optionalShortTextSchema.describe("Optional reference number"),
-      description: optionalTextFieldSchema.describe("Optional description or memo"),
-      customer_id: entityIdSchema.optional().describe("Optional customer ID"),
-      currency_id: entityIdSchema.optional().describe("Optional currency ID"),
-    }),
+    parameters: z
+      .object({
+        organization_id: optionalOrganizationIdSchema.describe(
+          "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+        ),
+        transaction_id: entityIdSchema.describe("Uncategorized bank transaction ID"),
+        transaction_type: genericCategorizeTypeSchema.describe(
+          "Generic bank transaction type to create"
+        ),
+        from_account_id: entityIdSchema.describe("Source account ID for the transaction"),
+        to_account_id: entityIdSchema.describe("Destination account ID for the transaction"),
+        amount: moneySchema.describe("Transaction amount"),
+        date: dateSchema.describe("Transaction date (YYYY-MM-DD)"),
+        payment_mode: optionalShortTextSchema.describe(
+          "Optional payment mode such as Cash or Cheque"
+        ),
+        exchange_rate: exchangeRateSchema.optional().describe("Optional exchange rate"),
+        reference_number: optionalShortTextSchema.describe("Optional reference number"),
+        description: optionalTextFieldSchema.describe("Optional description or memo"),
+        customer_id: entityIdSchema.optional().describe("Optional customer ID"),
+        currency_id: entityIdSchema.optional().describe("Optional currency ID"),
+      })
+      .strict(),
     annotations: {
       title: "Categorize Bank Transaction (Generic)",
       readOnlyHint: false,
@@ -503,24 +505,26 @@ Prefer matching or expense/vendor/customer payment categorization when those are
     name: "categorize_bank_transaction_as_expense",
     description: `Categorize an uncategorized bank transaction as an expense.
 Use this for routine spending that should become an expense record instead of a manual journal entry.`,
-    parameters: z.object({
-      organization_id: optionalOrganizationIdSchema.describe(
-        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
-      ),
-      transaction_id: entityIdSchema.describe("Uncategorized bank transaction ID"),
-      account_id: entityIdSchema.describe("Expense account ID"),
-      paid_through_account_id: entityIdSchema.describe(
-        "Bank or credit account the payment was made through"
-      ),
-      date: dateSchema.describe("Expense date (YYYY-MM-DD)"),
-      amount: moneySchema.describe("Expense amount"),
-      description: optionalTextFieldSchema.describe("Optional expense description"),
-      reference_number: optionalShortTextSchema.describe("Optional reference number"),
-      customer_id: entityIdSchema.optional().describe("Optional customer ID"),
-      vendor_id: entityIdSchema.optional().describe("Optional vendor ID"),
-      is_billable: z.boolean().optional().describe("Whether the expense is billable"),
-      exchange_rate: exchangeRateSchema.optional().describe("Optional exchange rate"),
-    }),
+    parameters: z
+      .object({
+        organization_id: optionalOrganizationIdSchema.describe(
+          "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+        ),
+        transaction_id: entityIdSchema.describe("Uncategorized bank transaction ID"),
+        account_id: entityIdSchema.describe("Expense account ID"),
+        paid_through_account_id: entityIdSchema.describe(
+          "Bank or credit account the payment was made through"
+        ),
+        date: dateSchema.describe("Expense date (YYYY-MM-DD)"),
+        amount: moneySchema.describe("Expense amount"),
+        description: optionalTextFieldSchema.describe("Optional expense description"),
+        reference_number: optionalShortTextSchema.describe("Optional reference number"),
+        customer_id: entityIdSchema.optional().describe("Optional customer ID"),
+        vendor_id: entityIdSchema.optional().describe("Optional vendor ID"),
+        is_billable: z.boolean().optional().describe("Whether the expense is billable"),
+        exchange_rate: exchangeRateSchema.optional().describe("Optional exchange rate"),
+      })
+      .strict(),
     annotations: {
       title: "Categorize Bank Transaction as Expense",
       readOnlyHint: false,
@@ -564,33 +568,35 @@ Use this for routine spending that should become an expense record instead of a 
     description: `Categorize an uncategorized bank transaction as a vendor payment.
 Use this when the bank line represents payment of one or more vendor bills.
 Prefer matching when the bank line should be linked to an existing Zoho transaction, and use manual journals only for exception cases that cannot be matched or categorized cleanly.`,
-    parameters: z.object({
-      organization_id: optionalOrganizationIdSchema.describe(
-        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
-      ),
-      transaction_id: entityIdSchema.describe("Uncategorized bank transaction ID"),
-      vendor_id: entityIdSchema.describe("Vendor ID"),
-      bills: z
-        .array(vendorPaymentBillSchema)
-        .min(1)
-        .max(50)
-        .describe("Bills to apply the payment against"),
-      amount: moneySchema.describe("Total vendor payment amount"),
-      date: dateSchema.describe("Payment date (YYYY-MM-DD)"),
-      paid_through_account_id: entityIdSchema.describe(
-        "Bank or credit account the payment was made through"
-      ),
-      payment_mode: optionalShortTextSchema.describe(
-        "Optional payment mode such as Cash or Cheque"
-      ),
-      description: optionalTextFieldSchema.describe("Optional payment description"),
-      reference_number: optionalShortTextSchema.describe("Optional reference number"),
-      exchange_rate: exchangeRateSchema.optional().describe("Optional exchange rate"),
-      is_paid_via_print_check: z
-        .boolean()
-        .optional()
-        .describe("Whether the payment was made via printed check"),
-    }),
+    parameters: z
+      .object({
+        organization_id: optionalOrganizationIdSchema.describe(
+          "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+        ),
+        transaction_id: entityIdSchema.describe("Uncategorized bank transaction ID"),
+        vendor_id: entityIdSchema.describe("Vendor ID"),
+        bills: z
+          .array(vendorPaymentBillSchema)
+          .min(1)
+          .max(50)
+          .describe("Bills to apply the payment against"),
+        amount: moneySchema.describe("Total vendor payment amount"),
+        date: dateSchema.describe("Payment date (YYYY-MM-DD)"),
+        paid_through_account_id: entityIdSchema.describe(
+          "Bank or credit account the payment was made through"
+        ),
+        payment_mode: optionalShortTextSchema.describe(
+          "Optional payment mode such as Cash or Cheque"
+        ),
+        description: optionalTextFieldSchema.describe("Optional payment description"),
+        reference_number: optionalShortTextSchema.describe("Optional reference number"),
+        exchange_rate: exchangeRateSchema.optional().describe("Optional exchange rate"),
+        is_paid_via_print_check: z
+          .boolean()
+          .optional()
+          .describe("Whether the payment was made via printed check"),
+      })
+      .strict(),
     annotations: {
       title: "Categorize Bank Transaction as Vendor Payment",
       readOnlyHint: false,
@@ -636,28 +642,30 @@ Prefer matching when the bank line should be linked to an existing Zoho transact
     description: `Categorize an uncategorized bank transaction as a customer payment.
 Use this when the bank line represents receipt of payment for one or more invoices.
 Prefer matching when the bank line should be linked to an existing Zoho transaction, and use manual journals only for exception cases that cannot be matched or categorized cleanly.`,
-    parameters: z.object({
-      organization_id: optionalOrganizationIdSchema.describe(
-        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
-      ),
-      transaction_id: entityIdSchema.describe("Uncategorized bank transaction ID"),
-      customer_id: entityIdSchema.describe("Customer ID"),
-      invoices: z
-        .array(customerPaymentInvoiceSchema)
-        .min(1)
-        .max(50)
-        .describe("Invoices to apply the payment against"),
-      amount: moneySchema.describe("Total customer payment amount"),
-      date: dateSchema.describe("Payment date (YYYY-MM-DD)"),
-      account_id: entityIdSchema.describe("Bank account ID receiving the payment"),
-      payment_mode: optionalShortTextSchema.describe(
-        "Optional payment mode such as Cash or Cheque"
-      ),
-      description: optionalTextFieldSchema.describe("Optional payment description"),
-      reference_number: optionalShortTextSchema.describe("Optional reference number"),
-      exchange_rate: exchangeRateSchema.optional().describe("Optional exchange rate"),
-      bank_charges: moneyOrZeroSchema.optional().describe("Optional bank charges"),
-    }),
+    parameters: z
+      .object({
+        organization_id: optionalOrganizationIdSchema.describe(
+          "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+        ),
+        transaction_id: entityIdSchema.describe("Uncategorized bank transaction ID"),
+        customer_id: entityIdSchema.describe("Customer ID"),
+        invoices: z
+          .array(customerPaymentInvoiceSchema)
+          .min(1)
+          .max(50)
+          .describe("Invoices to apply the payment against"),
+        amount: moneySchema.describe("Total customer payment amount"),
+        date: dateSchema.describe("Payment date (YYYY-MM-DD)"),
+        account_id: entityIdSchema.describe("Bank account ID receiving the payment"),
+        payment_mode: optionalShortTextSchema.describe(
+          "Optional payment mode such as Cash or Cheque"
+        ),
+        description: optionalTextFieldSchema.describe("Optional payment description"),
+        reference_number: optionalShortTextSchema.describe("Optional reference number"),
+        exchange_rate: exchangeRateSchema.optional().describe("Optional exchange rate"),
+        bank_charges: moneyOrZeroSchema.optional().describe("Optional bank charges"),
+      })
+      .strict(),
     annotations: {
       title: "Categorize Bank Transaction as Customer Payment",
       readOnlyHint: false,
@@ -701,13 +709,15 @@ Prefer matching when the bank line should be linked to an existing Zoho transact
     description: `Uncategorize a previously categorized bank transaction and return it to uncategorized status.
 Use this to reverse an incorrect categorization and reprocess the bank line correctly.
 After uncategorizing, decide whether the bank line should be matched to an existing Zoho transaction, recategorized, or handled with a manual journal only in exception cases.`,
-    parameters: z.object({
-      organization_id: optionalOrganizationIdSchema.describe(
-        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
-      ),
-      account_id: entityIdSchema.describe("Bank account ID"),
-      transaction_id: entityIdSchema.describe("Categorized bank transaction ID to uncategorize"),
-    }),
+    parameters: z
+      .object({
+        organization_id: optionalOrganizationIdSchema.describe(
+          "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+        ),
+        account_id: entityIdSchema.describe("Bank account ID"),
+        transaction_id: entityIdSchema.describe("Categorized bank transaction ID to uncategorize"),
+      })
+      .strict(),
     annotations: {
       title: "Uncategorize Bank Transaction",
       readOnlyHint: false,

@@ -29,7 +29,7 @@ structure:
 rules:
   - Prefer separate tools when Zoho endpoints use different payloads.
   - Reuse shared client/validation helpers; do not hand-roll fetch logic in tool files.
-  - Keep schemas strict; validate numbers, dates, IDs, and file inputs.
+  - Keep new tool schemas strict with z.object(...).strict(); validate numbers, dates, IDs, and file inputs.
   - Banking flow: match or categorize first; journals are exception workflow.
   - Tool descriptions should help the agent choose the right workflow.
   - Add happy-path and error-path tests for every new tool.
