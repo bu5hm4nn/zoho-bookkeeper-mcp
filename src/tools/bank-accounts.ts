@@ -7,7 +7,9 @@ import type { FastMCP } from "fastmcp"
 import { zohoGet, zohoPost } from "../api/client.js"
 import type { BankAccount, BankTransaction, MatchingTransaction } from "../api/types.js"
 import {
+  dateSchema,
   entityIdSchema,
+  moneyOrZeroSchema,
   moneySchema,
   optionalDateSchema,
   optionalOrganizationIdSchema,
@@ -33,6 +35,41 @@ const matchTransactionSchema = z.object({
     .describe(
       "Zoho transaction type for the match candidate (for example deposit, transfer_fund, invoice, bill, or creditnote)"
     ),
+})
+
+const textFieldSchema = z.string().max(2000)
+const optionalShortTextSchema = z.string().max(100).optional()
+const optionalTextFieldSchema = textFieldSchema.optional()
+const exchangeRateSchema = z
+  .number()
+  .positive("Exchange rate must be positive")
+  .max(1_000_000, "Exchange rate too large")
+
+const genericCategorizeTypeSchema = z.enum([
+  "deposit",
+  "refund",
+  "transfer_fund",
+  "card_payment",
+  "sales_without_invoices",
+  "expense_refund",
+  "owner_contribution",
+  "interest_income",
+  "other_income",
+  "owner_drawings",
+  "sales_return",
+])
+
+const vendorPaymentBillSchema = z.object({
+  bill_id: entityIdSchema.describe("Bill ID to apply the payment against"),
+  amount_applied: moneySchema.describe("Amount to apply to the bill"),
+  tax_amount_withheld: moneyOrZeroSchema.optional().describe("Optional withheld tax amount"),
+})
+
+const customerPaymentInvoiceSchema = z.object({
+  invoice_id: entityIdSchema.describe("Invoice ID to apply the payment against"),
+  amount_applied: moneySchema.describe("Amount to apply to the invoice"),
+  tax_amount_withheld: moneyOrZeroSchema.optional().describe("Optional withheld tax amount"),
+  discount_amount: moneyOrZeroSchema.optional().describe("Optional invoice discount amount"),
 })
 
 /**
@@ -387,6 +424,304 @@ Use this when the wrong Zoho transaction was reconciled to a statement line.`,
       }
 
       return `**Success**: Bank transaction unmatched
+- **Bank Transaction ID**: \`${args.transaction_id}\`
+- **Account ID**: \`${args.account_id}\`
+- **New Status**: uncategorized`
+    },
+  })
+
+  // Categorize an uncategorized bank transaction as a generic bank transaction
+  server.addTool({
+    name: "categorize_bank_transaction_generic",
+    description: `Categorize an uncategorized bank transaction into a general Zoho bank transaction.
+Use this for deposits, transfers, owner contributions/drawings, interest income, other income, sales without invoices, expense refunds, sales returns, and similar bank-native bookkeeping flows.
+Prefer matching or expense/vendor/customer payment categorization when those are a better fit than a generic bank transaction.`,
+    parameters: z.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      transaction_id: entityIdSchema.describe("Uncategorized bank transaction ID"),
+      transaction_type: genericCategorizeTypeSchema.describe(
+        "Generic bank transaction type to create"
+      ),
+      from_account_id: entityIdSchema.describe("Source account ID for the transaction"),
+      to_account_id: entityIdSchema.describe("Destination account ID for the transaction"),
+      amount: moneySchema.describe("Transaction amount"),
+      date: dateSchema.describe("Transaction date (YYYY-MM-DD)"),
+      payment_mode: optionalShortTextSchema.describe(
+        "Optional payment mode such as Cash or Cheque"
+      ),
+      exchange_rate: exchangeRateSchema.optional().describe("Optional exchange rate"),
+      reference_number: optionalShortTextSchema.describe("Optional reference number"),
+      description: optionalTextFieldSchema.describe("Optional description or memo"),
+      customer_id: entityIdSchema.optional().describe("Optional customer ID"),
+      currency_id: entityIdSchema.optional().describe("Optional currency ID"),
+    }),
+    annotations: {
+      title: "Categorize Bank Transaction (Generic)",
+      readOnlyHint: false,
+      openWorldHint: true,
+    },
+    execute: async (args) => {
+      const payload: Record<string, unknown> = {
+        transaction_type: args.transaction_type,
+        from_account_id: args.from_account_id,
+        to_account_id: args.to_account_id,
+        amount: args.amount,
+        date: args.date,
+      }
+      if (args.payment_mode) payload.payment_mode = args.payment_mode
+      if (args.exchange_rate !== undefined) payload.exchange_rate = args.exchange_rate
+      if (args.reference_number) payload.reference_number = args.reference_number
+      if (args.description) payload.description = args.description
+      if (args.customer_id) payload.customer_id = args.customer_id
+      if (args.currency_id) payload.currency_id = args.currency_id
+
+      const result = await zohoPost<{ message?: string }>(
+        `/banktransactions/uncategorized/${args.transaction_id}/categorize`,
+        args.organization_id,
+        payload
+      )
+
+      if (!result.ok) {
+        return result.errorMessage || "Failed to categorize bank transaction"
+      }
+
+      return `**Success**: Bank transaction categorized
+- **Bank Transaction ID**: \`${args.transaction_id}\`
+- **Categorized As**: ${args.transaction_type}
+- **Amount**: ${args.amount}
+- **Date**: ${args.date}`
+    },
+  })
+
+  // Categorize an uncategorized bank transaction as an expense
+  server.addTool({
+    name: "categorize_bank_transaction_as_expense",
+    description: `Categorize an uncategorized bank transaction as an expense.
+Use this for routine spending that should become an expense record instead of a manual journal entry.`,
+    parameters: z.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      transaction_id: entityIdSchema.describe("Uncategorized bank transaction ID"),
+      account_id: entityIdSchema.describe("Expense account ID"),
+      paid_through_account_id: entityIdSchema.describe(
+        "Bank or credit account the payment was made through"
+      ),
+      date: dateSchema.describe("Expense date (YYYY-MM-DD)"),
+      amount: moneySchema.describe("Expense amount"),
+      description: optionalTextFieldSchema.describe("Optional expense description"),
+      reference_number: optionalShortTextSchema.describe("Optional reference number"),
+      customer_id: entityIdSchema.optional().describe("Optional customer ID"),
+      vendor_id: entityIdSchema.optional().describe("Optional vendor ID"),
+      is_billable: z.boolean().optional().describe("Whether the expense is billable"),
+      exchange_rate: exchangeRateSchema.optional().describe("Optional exchange rate"),
+    }),
+    annotations: {
+      title: "Categorize Bank Transaction as Expense",
+      readOnlyHint: false,
+      openWorldHint: true,
+    },
+    execute: async (args) => {
+      const payload: Record<string, unknown> = {
+        account_id: args.account_id,
+        paid_through_account_id: args.paid_through_account_id,
+        date: args.date,
+        amount: args.amount,
+      }
+      if (args.description) payload.description = args.description
+      if (args.reference_number) payload.reference_number = args.reference_number
+      if (args.customer_id) payload.customer_id = args.customer_id
+      if (args.vendor_id) payload.vendor_id = args.vendor_id
+      if (args.is_billable !== undefined) payload.is_billable = args.is_billable
+      if (args.exchange_rate !== undefined) payload.exchange_rate = args.exchange_rate
+
+      const result = await zohoPost<{ message?: string }>(
+        `/banktransactions/uncategorized/${args.transaction_id}/categorize/expenses`,
+        args.organization_id,
+        payload
+      )
+
+      if (!result.ok) {
+        return result.errorMessage || "Failed to categorize bank transaction as expense"
+      }
+
+      return `**Success**: Bank transaction categorized as expense
+- **Bank Transaction ID**: \`${args.transaction_id}\`
+- **Expense Account ID**: \`${args.account_id}\`
+- **Paid Through Account ID**: \`${args.paid_through_account_id}\`
+- **Amount**: ${args.amount}`
+    },
+  })
+
+  // Categorize an uncategorized bank transaction as a vendor payment
+  server.addTool({
+    name: "categorize_bank_transaction_as_vendor_payment",
+    description: `Categorize an uncategorized bank transaction as a vendor payment.
+Use this when the bank line represents payment of one or more vendor bills.`,
+    parameters: z.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      transaction_id: entityIdSchema.describe("Uncategorized bank transaction ID"),
+      vendor_id: entityIdSchema.describe("Vendor ID"),
+      bills: z
+        .array(vendorPaymentBillSchema)
+        .min(1)
+        .max(50)
+        .describe("Bills to apply the payment against"),
+      amount: moneySchema.describe("Total vendor payment amount"),
+      date: dateSchema.describe("Payment date (YYYY-MM-DD)"),
+      paid_through_account_id: entityIdSchema.describe(
+        "Bank or credit account the payment was made through"
+      ),
+      payment_mode: optionalShortTextSchema.describe(
+        "Optional payment mode such as Cash or Cheque"
+      ),
+      description: optionalTextFieldSchema.describe("Optional payment description"),
+      reference_number: optionalShortTextSchema.describe("Optional reference number"),
+      exchange_rate: exchangeRateSchema.optional().describe("Optional exchange rate"),
+      is_paid_via_print_check: z
+        .boolean()
+        .optional()
+        .describe("Whether the payment was made via printed check"),
+    }),
+    annotations: {
+      title: "Categorize Bank Transaction as Vendor Payment",
+      readOnlyHint: false,
+      openWorldHint: true,
+    },
+    execute: async (args) => {
+      const payload: Record<string, unknown> = {
+        vendor_id: args.vendor_id,
+        bills: args.bills,
+        amount: args.amount,
+        date: args.date,
+        paid_through_account_id: args.paid_through_account_id,
+      }
+      if (args.payment_mode) payload.payment_mode = args.payment_mode
+      if (args.description) payload.description = args.description
+      if (args.reference_number) payload.reference_number = args.reference_number
+      if (args.exchange_rate !== undefined) payload.exchange_rate = args.exchange_rate
+      if (args.is_paid_via_print_check !== undefined) {
+        payload.is_paid_via_print_check = args.is_paid_via_print_check
+      }
+
+      const result = await zohoPost<{ message?: string }>(
+        `/banktransactions/uncategorized/${args.transaction_id}/categorize/vendorpayments`,
+        args.organization_id,
+        payload
+      )
+
+      if (!result.ok) {
+        return result.errorMessage || "Failed to categorize bank transaction as vendor payment"
+      }
+
+      return `**Success**: Bank transaction categorized as vendor payment
+- **Bank Transaction ID**: \`${args.transaction_id}\`
+- **Vendor ID**: \`${args.vendor_id}\`
+- **Bills Applied**: ${args.bills.length}
+- **Amount**: ${args.amount}`
+    },
+  })
+
+  // Categorize an uncategorized bank transaction as a customer payment
+  server.addTool({
+    name: "categorize_bank_transaction_as_customer_payment",
+    description: `Categorize an uncategorized bank transaction as a customer payment.
+Use this when the bank line represents receipt of payment for one or more invoices.`,
+    parameters: z.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      transaction_id: entityIdSchema.describe("Uncategorized bank transaction ID"),
+      customer_id: entityIdSchema.describe("Customer ID"),
+      invoices: z
+        .array(customerPaymentInvoiceSchema)
+        .min(1)
+        .max(50)
+        .describe("Invoices to apply the payment against"),
+      amount: moneySchema.describe("Total customer payment amount"),
+      date: dateSchema.describe("Payment date (YYYY-MM-DD)"),
+      account_id: entityIdSchema.describe("Bank account ID receiving the payment"),
+      payment_mode: optionalShortTextSchema.describe(
+        "Optional payment mode such as Cash or Cheque"
+      ),
+      description: optionalTextFieldSchema.describe("Optional payment description"),
+      reference_number: optionalShortTextSchema.describe("Optional reference number"),
+      exchange_rate: exchangeRateSchema.optional().describe("Optional exchange rate"),
+      bank_charges: moneyOrZeroSchema.optional().describe("Optional bank charges"),
+    }),
+    annotations: {
+      title: "Categorize Bank Transaction as Customer Payment",
+      readOnlyHint: false,
+      openWorldHint: true,
+    },
+    execute: async (args) => {
+      const payload: Record<string, unknown> = {
+        customer_id: args.customer_id,
+        invoices: args.invoices,
+        amount: args.amount,
+        date: args.date,
+        account_id: args.account_id,
+      }
+      if (args.payment_mode) payload.payment_mode = args.payment_mode
+      if (args.description) payload.description = args.description
+      if (args.reference_number) payload.reference_number = args.reference_number
+      if (args.exchange_rate !== undefined) payload.exchange_rate = args.exchange_rate
+      if (args.bank_charges !== undefined) payload.bank_charges = args.bank_charges
+
+      const result = await zohoPost<{ message?: string }>(
+        `/banktransactions/uncategorized/${args.transaction_id}/categorize/customerpayments`,
+        args.organization_id,
+        payload
+      )
+
+      if (!result.ok) {
+        return result.errorMessage || "Failed to categorize bank transaction as customer payment"
+      }
+
+      return `**Success**: Bank transaction categorized as customer payment
+- **Bank Transaction ID**: \`${args.transaction_id}\`
+- **Customer ID**: \`${args.customer_id}\`
+- **Invoices Applied**: ${args.invoices.length}
+- **Amount**: ${args.amount}`
+    },
+  })
+
+  // Revert a categorized bank transaction back to uncategorized
+  server.addTool({
+    name: "uncategorize_bank_transaction",
+    description: `Uncategorize a previously categorized bank transaction and return it to uncategorized status.
+Use this to reverse an incorrect categorization and reprocess the bank line correctly.`,
+    parameters: z.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      account_id: entityIdSchema.describe("Bank account ID"),
+      transaction_id: entityIdSchema.describe("Categorized bank transaction ID to uncategorize"),
+    }),
+    annotations: {
+      title: "Uncategorize Bank Transaction",
+      readOnlyHint: false,
+      openWorldHint: true,
+    },
+    execute: async (args) => {
+      const result = await zohoPost<{ message?: string }>(
+        `/banktransactions/${args.transaction_id}/uncategorize`,
+        args.organization_id,
+        undefined,
+        {
+          account_id: args.account_id,
+        }
+      )
+
+      if (!result.ok) {
+        return result.errorMessage || "Failed to uncategorize bank transaction"
+      }
+
+      return `**Success**: Bank transaction uncategorized
 - **Bank Transaction ID**: \`${args.transaction_id}\`
 - **Account ID**: \`${args.account_id}\`
 - **New Status**: uncategorized`
