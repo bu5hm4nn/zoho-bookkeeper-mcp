@@ -324,6 +324,31 @@ describe("MCP Tools", () => {
         expect(result).toContain("Vendors")
       })
 
+      it("escapes vendor fields in list output", async () => {
+        mockZohoGet.mockResolvedValue({
+          ok: true,
+          data: {
+            contacts: [
+              {
+                contact_id: "vendor-123",
+                contact_name: "**Office Depot**\nInjected",
+                contact_type: "vendor",
+                company_name: "ACME > Supplies",
+                email: "ap@example.com",
+                phone: "555-1000",
+                status: "active",
+              },
+            ],
+          },
+        })
+
+        const tool = tools.get("list_vendors")!
+        const result = await tool.execute({})
+
+        expect(result).toContain(String.raw`\*\*Office Depot\*\* Injected`)
+        expect(result).toContain(String.raw`ACME \> Supplies`)
+      })
+
       it("passes vendor query parameters correctly", async () => {
         mockZohoGet.mockResolvedValue({
           ok: true,
@@ -399,6 +424,36 @@ describe("MCP Tools", () => {
         expect(result).toContain("123 Supply St")
       })
 
+      it("escapes vendor address and profile fields in detail output", async () => {
+        mockZohoGet.mockResolvedValue({
+          ok: true,
+          data: {
+            contact: {
+              contact_id: "vendor-123",
+              contact_name: "Vendor [One]",
+              contact_type: "vendor",
+              company_name: "ACME > Supplies",
+              email: "ap@example.com",
+              phone: "555-1000",
+              status: "active",
+              currency_code: "US_D",
+              billing_address: {
+                address: "Line 1\nLine 2",
+                city: "Berlin",
+                country: "DE",
+              },
+            },
+          },
+        })
+
+        const tool = tools.get("get_vendor")!
+        const result = await tool.execute({ vendor_id: "vendor-123" })
+
+        expect(result).toContain(String.raw`Vendor \[One\]`)
+        expect(result).toContain(String.raw`ACME \> Supplies`)
+        expect(result).toContain("Line 1 Line 2, Berlin, DE")
+      })
+
       it("rejects non-vendor contacts", async () => {
         mockZohoGet.mockResolvedValue({
           ok: true,
@@ -458,7 +513,7 @@ describe("MCP Tools", () => {
 
         const tool = tools.get("create_vendor")!
         const result = await tool.execute({
-          contact_name: "Office Depot",
+          display_name: "Office Depot",
           company_name: "Office Depot GmbH",
           email: "ap@officedepot.example",
           phone: "555-1000",
@@ -489,6 +544,15 @@ describe("MCP Tools", () => {
           },
           notes: "Preferred office supplier",
         })
+      })
+
+      it("requires contact_name or display_name when creating a vendor", async () => {
+        const tool = tools.get("create_vendor")!
+        const result = await tool.execute({})
+
+        expect(result).toBe(
+          "**Validation Error**: Provide contact_name or display_name for the vendor."
+        )
       })
 
       it("returns API errors when vendor creation fails", async () => {
@@ -524,7 +588,7 @@ describe("MCP Tools", () => {
         const tool = tools.get("update_vendor")!
         const result = await tool.execute({
           vendor_id: "vendor-123",
-          contact_name: "Office Depot Europe",
+          display_name: "Office Depot Europe",
           email: "payables@officedepot.example",
         })
 

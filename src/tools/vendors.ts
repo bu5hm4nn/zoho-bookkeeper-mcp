@@ -23,6 +23,15 @@ const vendorAddressSchema = z
   })
   .strict()
 
+function escapeMarkdownText(value?: string): string {
+  if (!value) return "N/A"
+
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/([`*_{}[\]()#+\-.!|>])/g, "\\$1")
+    .replace(/\r?\n/g, " ")
+}
+
 function formatAddress(address?: ContactAddress): string {
   if (!address) return "N/A"
 
@@ -37,16 +46,7 @@ function formatAddress(address?: ContactAddress): string {
     address.country,
   ].filter(Boolean)
 
-  return parts.length > 0 ? parts.join(", ") : "N/A"
-}
-
-function escapeMarkdownText(value?: string): string {
-  if (!value) return "N/A"
-
-  return value
-    .replace(/\\/g, "\\\\")
-    .replace(/([`*_{}[\]()#+\-.!|>])/g, "\\$1")
-    .replace(/\r?\n/g, " ")
+  return parts.length > 0 ? escapeMarkdownText(parts.join(", ")) : "N/A"
 }
 
 /**
@@ -108,12 +108,12 @@ Use this to find vendor_id values for expenses, bills, and vendor-payment bank c
 
       const formatted = vendors
         .map((vendor, index) => {
-          return `${index + 1}. **${vendor.contact_name}**
+          return `${index + 1}. **${escapeMarkdownText(vendor.contact_name)}**
    - Vendor ID: \`${vendor.contact_id}\`
-   - Company: ${vendor.company_name || "N/A"}
-   - Email: ${vendor.email || "N/A"}
-   - Phone: ${vendor.phone || "N/A"}
-   - Status: ${vendor.status}`
+   - Company: ${escapeMarkdownText(vendor.company_name)}
+   - Email: ${escapeMarkdownText(vendor.email)}
+   - Phone: ${escapeMarkdownText(vendor.phone)}
+   - Status: ${escapeMarkdownText(vendor.status)}`
         })
         .join("\n\n")
 
@@ -162,13 +162,13 @@ Use this to confirm a vendor_id before creating expenses, bills, or vendor-payme
       return `**Vendor Details**
 
 - **Vendor ID**: \`${vendor.contact_id}\`
-- **Name**: ${vendor.contact_name}
-- **Company**: ${vendor.company_name || "N/A"}
-- **Email**: ${vendor.email || "N/A"}
-- **Phone**: ${vendor.phone || "N/A"}
-- **Status**: ${vendor.status}
+- **Name**: ${escapeMarkdownText(vendor.contact_name)}
+- **Company**: ${escapeMarkdownText(vendor.company_name)}
+- **Email**: ${escapeMarkdownText(vendor.email)}
+- **Phone**: ${escapeMarkdownText(vendor.phone)}
+- **Status**: ${escapeMarkdownText(vendor.status)}
 - **Payment Terms**: ${vendor.payment_terms !== undefined ? `${vendor.payment_terms} days` : "N/A"}
-- **Currency**: ${vendor.currency_code || "N/A"}
+- **Currency**: ${escapeMarkdownText(vendor.currency_code)}
 - **Billing Address**: ${formatAddress(vendor.billing_address)}
 - **Notes**: ${escapeMarkdownText(vendor.notes)}`
     },
@@ -184,7 +184,12 @@ Use this when expense, bill, or vendor-payment workflows need a vendor_id that d
         organization_id: optionalOrganizationIdSchema.describe(
           "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
         ),
-        contact_name: z.string().max(200).describe("Vendor display name in Zoho Books"),
+        contact_name: z.string().max(200).optional().describe("Optional Zoho contact_name value"),
+        display_name: z
+          .string()
+          .max(200)
+          .optional()
+          .describe("Optional vendor display name alias; used as Zoho contact_name if provided"),
         company_name: z.string().max(200).optional().describe("Optional legal or company name"),
         email: z
           .string()
@@ -211,8 +216,14 @@ Use this when expense, bill, or vendor-payment workflows need a vendor_id that d
       openWorldHint: true,
     },
     execute: async (args) => {
+      const contactName = args.display_name || args.contact_name
+
+      if (!contactName) {
+        return "**Validation Error**: Provide contact_name or display_name for the vendor."
+      }
+
       const payload: Record<string, unknown> = {
-        contact_name: args.contact_name,
+        contact_name: contactName,
         contact_type: "vendor",
       }
 
@@ -243,10 +254,10 @@ Use this when expense, bill, or vendor-payment workflows need a vendor_id that d
       return `**Vendor Created Successfully**
 
 - **Vendor ID**: \`${vendor.contact_id}\`
-- **Name**: ${vendor.contact_name}
-- **Company**: ${vendor.company_name || "N/A"}
-- **Email**: ${vendor.email || "N/A"}
-- **Phone**: ${vendor.phone || "N/A"}
+- **Name**: ${escapeMarkdownText(vendor.contact_name)}
+- **Company**: ${escapeMarkdownText(vendor.company_name)}
+- **Email**: ${escapeMarkdownText(vendor.email)}
+- **Phone**: ${escapeMarkdownText(vendor.phone)}
 
 Use this vendor_id for expenses, bills, and vendor-payment categorizations.`
     },
@@ -263,7 +274,12 @@ Use this to correct or enrich vendor details needed for expenses, bills, and ven
           "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
         ),
         vendor_id: entityIdSchema.describe("Vendor ID (contact_id in Zoho Books)"),
-        contact_name: z.string().max(200).optional().describe("New vendor display name"),
+        contact_name: z.string().max(200).optional().describe("New Zoho contact_name value"),
+        display_name: z
+          .string()
+          .max(200)
+          .optional()
+          .describe("Optional vendor display name alias; used as Zoho contact_name if provided"),
         company_name: z.string().max(200).optional().describe("New legal or company name"),
         email: z
           .string()
@@ -292,7 +308,8 @@ Use this to correct or enrich vendor details needed for expenses, bills, and ven
     execute: async (args) => {
       const payload: Record<string, unknown> = {}
 
-      if (args.contact_name) payload.contact_name = args.contact_name
+      if (args.display_name) payload.contact_name = args.display_name
+      else if (args.contact_name) payload.contact_name = args.contact_name
       if (args.company_name) payload.company_name = args.company_name
       if (args.email) payload.email = args.email
       if (args.phone) payload.phone = args.phone
@@ -324,10 +341,10 @@ Use this to correct or enrich vendor details needed for expenses, bills, and ven
       return `**Vendor Updated Successfully**
 
 - **Vendor ID**: \`${vendor.contact_id}\`
-- **Name**: ${vendor.contact_name}
-- **Company**: ${vendor.company_name || "N/A"}
-- **Email**: ${vendor.email || "N/A"}
-- **Phone**: ${vendor.phone || "N/A"}`
+- **Name**: ${escapeMarkdownText(vendor.contact_name)}
+- **Company**: ${escapeMarkdownText(vendor.company_name)}
+- **Email**: ${escapeMarkdownText(vendor.email)}
+- **Phone**: ${escapeMarkdownText(vendor.phone)}`
     },
   })
 }
