@@ -1358,6 +1358,16 @@ describe("MCP Tools", () => {
         expect(result).toContain("200")
       })
 
+      it("rejects empty update payload", async () => {
+        const tool = tools.get("update_expense")!
+        const result = await tool.execute({
+          expense_id: "exp-123",
+        })
+
+        expect(result).toBe("**Validation Error**: Provide at least one expense field to update.")
+        expect(mockZohoPut).not.toHaveBeenCalled()
+      })
+
       it("returns API errors when update fails", async () => {
         mockZohoPut.mockResolvedValue({
           ok: false,

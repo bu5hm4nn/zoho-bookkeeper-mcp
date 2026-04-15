@@ -459,6 +459,10 @@ Zoho will auto-calculate the amount from mileage fields.`,
       if (args.start_reading !== undefined) payload.start_reading = args.start_reading
       if (args.end_reading !== undefined) payload.end_reading = args.end_reading
 
+      if (Object.keys(payload).length === 0) {
+        return "**Validation Error**: Provide at least one expense field to update."
+      }
+
       const result = await zohoPut<{ expense: Expense }>(
         `/expenses/${args.expense_id}`,
         args.organization_id,
