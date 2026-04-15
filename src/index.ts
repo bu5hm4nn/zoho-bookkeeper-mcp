@@ -55,7 +55,7 @@ You do NOT need to call list_organizations first - just use the tools directly.
 
 ### Contacts, Vendors & Bank Accounts
 - list_contacts, get_contact
-- list_vendors, get_vendor, create_vendor
+- list_vendors, get_vendor, create_vendor, update_vendor
 - list_bank_accounts, get_bank_account, list_bank_transactions
 - get_bank_transaction_matches, match_bank_transaction, unmatch_bank_transaction
 - categorize_bank_transaction_generic, categorize_bank_transaction_as_expense

@@ -4,7 +4,7 @@
 
 import { z } from "zod"
 import type { FastMCP } from "fastmcp"
-import { zohoGet, zohoPost } from "../api/client.js"
+import { zohoGet, zohoPost, zohoPut } from "../api/client.js"
 import type { Contact, ContactAddress } from "../api/types.js"
 import { entityIdSchema, optionalOrganizationIdSchema } from "../utils/validation.js"
 
@@ -249,6 +249,85 @@ Use this when expense, bill, or vendor-payment workflows need a vendor_id that d
 - **Phone**: ${vendor.phone || "N/A"}
 
 Use this vendor_id for expenses, bills, and vendor-payment categorizations.`
+    },
+  })
+
+  // Update Vendor
+  server.addTool({
+    name: "update_vendor",
+    description: `Update an existing vendor contact.
+Use this to correct or enrich vendor details needed for expenses, bills, and vendor-payment workflows.`,
+    parameters: z
+      .object({
+        organization_id: optionalOrganizationIdSchema.describe(
+          "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+        ),
+        vendor_id: entityIdSchema.describe("Vendor ID (contact_id in Zoho Books)"),
+        contact_name: z.string().max(200).optional().describe("New vendor display name"),
+        company_name: z.string().max(200).optional().describe("New legal or company name"),
+        email: z
+          .string()
+          .email("Invalid email address")
+          .max(320)
+          .optional()
+          .describe("New vendor email"),
+        phone: z.string().max(50).optional().describe("New vendor phone number"),
+        currency_id: entityIdSchema.optional().describe("New currency ID"),
+        payment_terms: z
+          .number()
+          .int()
+          .min(0)
+          .max(3650)
+          .optional()
+          .describe("New payment terms in days"),
+        billing_address: vendorAddressSchema.optional().describe("New billing address"),
+        notes: z.string().max(2000).optional().describe("New internal notes for the vendor"),
+      })
+      .strict(),
+    annotations: {
+      title: "Update Vendor",
+      readOnlyHint: false,
+      openWorldHint: true,
+    },
+    execute: async (args) => {
+      const payload: Record<string, unknown> = {}
+
+      if (args.contact_name) payload.contact_name = args.contact_name
+      if (args.company_name) payload.company_name = args.company_name
+      if (args.email) payload.email = args.email
+      if (args.phone) payload.phone = args.phone
+      if (args.currency_id) payload.currency_id = args.currency_id
+      if (args.payment_terms !== undefined) payload.payment_terms = args.payment_terms
+      if (args.billing_address) payload.billing_address = args.billing_address
+      if (args.notes) payload.notes = args.notes
+
+      if (Object.keys(payload).length === 0) {
+        return "**Validation Error**: Provide at least one vendor field to update."
+      }
+
+      const result = await zohoPut<{ contact: Contact }>(
+        `/contacts/${args.vendor_id}`,
+        args.organization_id,
+        payload
+      )
+
+      if (!result.ok) {
+        return result.errorMessage || "Failed to update vendor"
+      }
+
+      const vendor = result.data?.contact
+
+      if (!vendor) {
+        return `**Vendor Updated Successfully**\n\nVendor ID: \`${args.vendor_id}\``
+      }
+
+      return `**Vendor Updated Successfully**
+
+- **Vendor ID**: \`${vendor.contact_id}\`
+- **Name**: ${vendor.contact_name}
+- **Company**: ${vendor.company_name || "N/A"}
+- **Email**: ${vendor.email || "N/A"}
+- **Phone**: ${vendor.phone || "N/A"}`
     },
   })
 }

@@ -10,9 +10,10 @@ vi.mock("../../api/client.js", () => ({
   zohoListOrganizations: vi.fn(),
   zohoGet: vi.fn(),
   zohoPost: vi.fn(),
+  zohoPut: vi.fn(),
 }))
 
-import { zohoListOrganizations, zohoGet, zohoPost } from "../../api/client.js"
+import { zohoListOrganizations, zohoGet, zohoPost, zohoPut } from "../../api/client.js"
 import { registerOrganizationTools } from "../../tools/organizations.js"
 import { registerContactTools } from "../../tools/contacts.js"
 import { registerVendorTools } from "../../tools/vendors.js"
@@ -22,6 +23,7 @@ import { registerBankAccountTools } from "../../tools/bank-accounts.js"
 const mockZohoListOrganizations = vi.mocked(zohoListOrganizations)
 const mockZohoGet = vi.mocked(zohoGet)
 const mockZohoPost = vi.mocked(zohoPost)
+const mockZohoPut = vi.mocked(zohoPut)
 
 describe("MCP Tools", () => {
   let server: FastMCP
@@ -499,6 +501,61 @@ describe("MCP Tools", () => {
         const result = await tool.execute({ contact_name: "Office Depot" })
 
         expect(result).toBe("Vendor already exists")
+      })
+    })
+
+    describe("update_vendor", () => {
+      it("updates a vendor successfully", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: true,
+          data: {
+            contact: {
+              contact_id: "vendor-123",
+              contact_name: "Office Depot Europe",
+              contact_type: "vendor",
+              company_name: "Office Depot GmbH",
+              email: "payables@officedepot.example",
+              phone: "555-2000",
+              status: "active",
+            },
+          },
+        })
+
+        const tool = tools.get("update_vendor")!
+        const result = await tool.execute({
+          vendor_id: "vendor-123",
+          contact_name: "Office Depot Europe",
+          email: "payables@officedepot.example",
+        })
+
+        expect(result).toContain("Vendor Updated Successfully")
+        expect(result).toContain("vendor-123")
+        expect(mockZohoPut).toHaveBeenCalledWith("/contacts/vendor-123", undefined, {
+          contact_name: "Office Depot Europe",
+          email: "payables@officedepot.example",
+        })
+      })
+
+      it("requires at least one field to update", async () => {
+        const tool = tools.get("update_vendor")!
+        const result = await tool.execute({ vendor_id: "vendor-123" })
+
+        expect(result).toBe("**Validation Error**: Provide at least one vendor field to update.")
+      })
+
+      it("returns API errors when vendor update fails", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: false,
+          errorMessage: "Vendor not found",
+        })
+
+        const tool = tools.get("update_vendor")!
+        const result = await tool.execute({
+          vendor_id: "vendor-123",
+          phone: "555-2000",
+        })
+
+        expect(result).toBe("Vendor not found")
       })
     })
   })
