@@ -4,8 +4,13 @@
 
 import { z } from "zod"
 import type { FastMCP } from "fastmcp"
-import { zohoGet, zohoPost } from "../api/client.js"
-import type { BankAccount, BankTransaction, MatchingTransaction } from "../api/types.js"
+import { zohoGet, zohoPost, zohoPut } from "../api/client.js"
+import type {
+  BankAccount,
+  BankTransaction,
+  BankTransactionDetail,
+  MatchingTransaction,
+} from "../api/types.js"
 import {
   dateSchema,
   entityIdSchema,
@@ -705,6 +710,374 @@ Prefer matching when the bank line should be linked to an existing Zoho transact
 - **Customer ID**: \`${args.customer_id}\`
 - **Invoices Applied**: ${args.invoices.length}
 - **Amount**: ${args.amount}`
+    },
+  })
+
+  // --- Edit tools for categorized bank transactions ---
+
+  // Get Bank Transaction Detail (for inspecting categorized entries)
+  server.addTool({
+    name: "get_bank_transaction",
+    description: `Get detailed information about a specific bank transaction, including its categorization details.
+Use this to inspect a categorized bank transaction and discover the associated entity IDs (expense_id, vendor_payment_id, customer_payment_id) needed for editing.
+Returns full transaction details including transaction_type, status, from/to accounts, line items, and any associated entity IDs.`,
+    parameters: z.object({
+      organization_id: optionalOrganizationIdSchema.describe(
+        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+      ),
+      transaction_id: entityIdSchema.describe("Bank transaction ID"),
+    }),
+    annotations: {
+      title: "Get Bank Transaction Details",
+      readOnlyHint: true,
+      openWorldHint: true,
+    },
+    execute: async (args) => {
+      const result = await zohoGet<{ banktransaction: BankTransactionDetail }>(
+        `/banktransactions/${args.transaction_id}`,
+        args.organization_id
+      )
+
+      if (!result.ok) {
+        return result.errorMessage || "Failed to get bank transaction"
+      }
+
+      const tx = result.data?.banktransaction
+
+      if (!tx) {
+        return "Bank transaction not found"
+      }
+
+      const amount = tx.debit_or_credit === "debit" ? `-${tx.amount}` : `+${tx.amount}`
+      const lines: string[] = [
+        `**Bank Transaction Details**`,
+        ``,
+        `- **Transaction ID**: \`${tx.transaction_id}\``,
+        `- **Date**: ${tx.date}`,
+        `- **Type**: ${tx.transaction_type}`,
+        `- **Status**: ${tx.status}`,
+        `- **Amount**: ${tx.currency_code || ""} ${amount}`,
+      ]
+      if (tx.from_account_id) lines.push(`- **From Account ID**: \`${tx.from_account_id}\``)
+      if (tx.to_account_id) lines.push(`- **To Account ID**: \`${tx.to_account_id}\``)
+      if (tx.account_id) lines.push(`- **Account ID**: \`${tx.account_id}\``)
+      if (tx.customer_id) lines.push(`- **Customer ID**: \`${tx.customer_id}\``)
+      if (tx.vendor_id) lines.push(`- **Vendor ID**: \`${tx.vendor_id}\``)
+      if (tx.payment_mode) lines.push(`- **Payment Mode**: ${tx.payment_mode}`)
+      if (tx.reference_number) lines.push(`- **Reference Number**: ${tx.reference_number}`)
+      if (tx.exchange_rate !== undefined) lines.push(`- **Exchange Rate**: ${tx.exchange_rate}`)
+      if (tx.bank_charges !== undefined) lines.push(`- **Bank Charges**: ${tx.bank_charges}`)
+      if (tx.description) lines.push(`- **Description**: ${tx.description}`)
+      if (tx.source) lines.push(`- **Source**: ${tx.source}`)
+      if (tx.payee) lines.push(`- **Payee**: ${tx.payee}`)
+      if (tx.associated_entity_id)
+        lines.push(`- **Associated Entity ID**: \`${tx.associated_entity_id}\``)
+
+      if (tx.line_items && tx.line_items.length > 0) {
+        lines.push(``, `**Line Items**:`)
+        tx.line_items.forEach((item, i) => {
+          lines.push(
+            `  ${i + 1}. Account: \`${item.account_id || "N/A"}\` (${item.account_name || "N/A"}) | Amount: ${item.amount || 0} | ${item.debit_or_credit || "N/A"}`
+          )
+        })
+      }
+
+      if (tx.imported_transactions && tx.imported_transactions.length > 0) {
+        lines.push(``, `**Imported Transactions**:`)
+        tx.imported_transactions.forEach((imp, i) => {
+          lines.push(
+            `  ${i + 1}. ID: \`${imp.imported_transaction_id || "N/A"}\` | Date: ${imp.date || "N/A"} | Amount: ${imp.amount || 0} | Payee: ${imp.payee || "N/A"} | Status: ${imp.status || "N/A"}`
+          )
+        })
+      }
+
+      return lines.join("\n")
+    },
+  })
+
+  // Update a categorized bank transaction (generic types: deposit, refund, transfer_fund, etc.)
+  server.addTool({
+    name: "update_categorized_bank_transaction",
+    description: `Edit a categorized bank transaction (deposit, refund, transfer_fund, card_payment, sales_without_invoices, expense_refund, owner_contribution, interest_income, other_income, owner_drawings, sales_return).
+You cannot change the transaction_type via this endpoint — to change category type, first uncategorize the transaction then re-categorize.
+Reconciled transactions cannot be edited; the API will return an error.`,
+    parameters: z
+      .object({
+        organization_id: optionalOrganizationIdSchema.describe(
+          "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+        ),
+        transaction_id: entityIdSchema.describe("Categorized bank transaction ID to update"),
+        transaction_type: genericCategorizeTypeSchema.describe(
+          "Must match the existing transaction type (cannot change type via this endpoint)"
+        ),
+        from_account_id: entityIdSchema.optional().describe("Source account ID"),
+        to_account_id: entityIdSchema.optional().describe("Destination account ID"),
+        amount: moneySchema.optional().describe("Updated transaction amount"),
+        date: dateSchema.optional().describe("Updated transaction date (YYYY-MM-DD)"),
+        payment_mode: optionalShortTextSchema.describe("Payment mode such as Cash or Cheque"),
+        exchange_rate: exchangeRateSchema.optional().describe("Exchange rate"),
+        customer_id: entityIdSchema.optional().describe("Customer ID"),
+        reference_number: optionalShortTextSchema.describe("Reference number"),
+        description: optionalTextFieldSchema.describe("Description or memo"),
+        currency_id: entityIdSchema.optional().describe("Currency ID"),
+        bank_charges: moneyOrZeroSchema.optional().describe("Bank charges"),
+      })
+      .strict(),
+    annotations: {
+      title: "Update Categorized Bank Transaction",
+      readOnlyHint: false,
+      openWorldHint: true,
+    },
+    execute: async (args) => {
+      const { organization_id, transaction_id, transaction_type, ...fields } = args
+
+      if (Object.values(fields).every((v) => v === undefined || v === null)) {
+        return "**Validation Error**: At least one updatable field must be provided (beyond transaction_id and transaction_type)."
+      }
+
+      const payload: Record<string, unknown> = {
+        transaction_type: transaction_type,
+      }
+      if (fields.from_account_id !== undefined) payload.from_account_id = fields.from_account_id
+      if (fields.to_account_id !== undefined) payload.to_account_id = fields.to_account_id
+      if (fields.amount !== undefined) payload.amount = fields.amount
+      if (fields.date !== undefined) payload.date = fields.date
+      if (fields.payment_mode !== undefined) payload.payment_mode = fields.payment_mode
+      if (fields.exchange_rate !== undefined) payload.exchange_rate = fields.exchange_rate
+      if (fields.customer_id !== undefined) payload.customer_id = fields.customer_id
+      if (fields.reference_number !== undefined) payload.reference_number = fields.reference_number
+      if (fields.description !== undefined) payload.description = fields.description
+      if (fields.currency_id !== undefined) payload.currency_id = fields.currency_id
+      if (fields.bank_charges !== undefined) payload.bank_charges = fields.bank_charges
+
+      const result = await zohoPut<{ message?: string }>(
+        `/banktransactions/${transaction_id}`,
+        organization_id,
+        payload
+      )
+
+      if (!result.ok) {
+        return result.errorMessage || "Failed to update categorized bank transaction"
+      }
+
+      return `**Success**: Categorized bank transaction updated
+- **Bank Transaction ID**: \`${transaction_id}\`
+- **Transaction Type**: ${transaction_type}`
+    },
+  })
+
+  // Update a categorized expense
+  server.addTool({
+    name: "update_categorized_expense",
+    description: `Edit an expense that was created via categorize_bank_transaction_as_expense.
+Use get_bank_transaction to find the expense_id from a categorized bank transaction before calling this tool.
+Reconciled transactions cannot be edited; the API will return an error.`,
+    parameters: z
+      .object({
+        organization_id: optionalOrganizationIdSchema.describe(
+          "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+        ),
+        expense_id: entityIdSchema.describe(
+          "Expense ID to update (use get_bank_transaction to find from a categorized bank transaction)"
+        ),
+        account_id: entityIdSchema.optional().describe("Expense account ID"),
+        paid_through_account_id: entityIdSchema
+          .optional()
+          .describe("Bank or credit account the payment was made through"),
+        date: dateSchema.optional().describe("Expense date (YYYY-MM-DD)"),
+        amount: moneySchema.optional().describe("Expense amount"),
+        description: optionalTextFieldSchema.describe("Expense description"),
+        reference_number: optionalShortTextSchema.describe("Reference number"),
+        customer_id: entityIdSchema.optional().describe("Customer ID"),
+        vendor_id: entityIdSchema.optional().describe("Vendor ID"),
+        is_billable: z.boolean().optional().describe("Whether the expense is billable"),
+        exchange_rate: exchangeRateSchema.optional().describe("Exchange rate"),
+      })
+      .strict(),
+    annotations: {
+      title: "Update Categorized Expense",
+      readOnlyHint: false,
+      openWorldHint: true,
+    },
+    execute: async (args) => {
+      const { organization_id, expense_id, ...fields } = args
+
+      if (Object.values(fields).every((v) => v === undefined || v === null)) {
+        return "**Validation Error**: At least one updatable field must be provided (beyond expense_id)."
+      }
+
+      const payload: Record<string, unknown> = {}
+      if (fields.account_id !== undefined) payload.account_id = fields.account_id
+      if (fields.paid_through_account_id !== undefined)
+        payload.paid_through_account_id = fields.paid_through_account_id
+      if (fields.date !== undefined) payload.date = fields.date
+      if (fields.amount !== undefined) payload.amount = fields.amount
+      if (fields.description !== undefined) payload.description = fields.description
+      if (fields.reference_number !== undefined) payload.reference_number = fields.reference_number
+      if (fields.customer_id !== undefined) payload.customer_id = fields.customer_id
+      if (fields.vendor_id !== undefined) payload.vendor_id = fields.vendor_id
+      if (fields.is_billable !== undefined) payload.is_billable = fields.is_billable
+      if (fields.exchange_rate !== undefined) payload.exchange_rate = fields.exchange_rate
+
+      const result = await zohoPut<{ message?: string }>(
+        `/expenses/${expense_id}`,
+        organization_id,
+        payload
+      )
+
+      if (!result.ok) {
+        return result.errorMessage || "Failed to update categorized expense"
+      }
+
+      return `**Success**: Categorized expense updated
+- **Expense ID**: \`${expense_id}\``
+    },
+  })
+
+  // Update a categorized vendor payment
+  server.addTool({
+    name: "update_categorized_vendor_payment",
+    description: `Edit a vendor payment that was created via categorize_bank_transaction_as_vendor_payment.
+Use get_bank_transaction to find the payment_id from a categorized bank transaction before calling this tool.
+Reconciled transactions cannot be edited; the API will return an error.`,
+    parameters: z
+      .object({
+        organization_id: optionalOrganizationIdSchema.describe(
+          "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+        ),
+        payment_id: entityIdSchema.describe(
+          "Vendor payment ID (use get_bank_transaction to find from a categorized bank transaction)"
+        ),
+        vendor_id: entityIdSchema.optional().describe("Vendor ID"),
+        bills: z
+          .array(vendorPaymentBillSchema)
+          .min(1)
+          .max(50)
+          .optional()
+          .describe("Bills to apply the payment against"),
+        amount: moneySchema.optional().describe("Total vendor payment amount"),
+        date: dateSchema.optional().describe("Payment date (YYYY-MM-DD)"),
+        paid_through_account_id: entityIdSchema
+          .optional()
+          .describe("Bank or credit account the payment was made through"),
+        payment_mode: optionalShortTextSchema.describe("Payment mode such as Cash or Cheque"),
+        description: optionalTextFieldSchema.describe("Payment description"),
+        reference_number: optionalShortTextSchema.describe("Reference number"),
+        exchange_rate: exchangeRateSchema.optional().describe("Exchange rate"),
+        is_paid_via_print_check: z
+          .boolean()
+          .optional()
+          .describe("Whether the payment was made via printed check"),
+      })
+      .strict(),
+    annotations: {
+      title: "Update Categorized Vendor Payment",
+      readOnlyHint: false,
+      openWorldHint: true,
+    },
+    execute: async (args) => {
+      const { organization_id, payment_id, ...fields } = args
+
+      if (Object.values(fields).every((v) => v === undefined || v === null)) {
+        return "**Validation Error**: At least one updatable field must be provided (beyond payment_id)."
+      }
+
+      const payload: Record<string, unknown> = {}
+      if (fields.vendor_id !== undefined) payload.vendor_id = fields.vendor_id
+      if (fields.bills !== undefined) payload.bills = fields.bills
+      if (fields.amount !== undefined) payload.amount = fields.amount
+      if (fields.date !== undefined) payload.date = fields.date
+      if (fields.paid_through_account_id !== undefined)
+        payload.paid_through_account_id = fields.paid_through_account_id
+      if (fields.payment_mode !== undefined) payload.payment_mode = fields.payment_mode
+      if (fields.description !== undefined) payload.description = fields.description
+      if (fields.reference_number !== undefined) payload.reference_number = fields.reference_number
+      if (fields.exchange_rate !== undefined) payload.exchange_rate = fields.exchange_rate
+      if (fields.is_paid_via_print_check !== undefined)
+        payload.is_paid_via_print_check = fields.is_paid_via_print_check
+
+      const result = await zohoPut<{ message?: string }>(
+        `/vendorpayments/${payment_id}`,
+        organization_id,
+        payload
+      )
+
+      if (!result.ok) {
+        return result.errorMessage || "Failed to update categorized vendor payment"
+      }
+
+      return `**Success**: Categorized vendor payment updated
+- **Payment ID**: \`${payment_id}\``
+    },
+  })
+
+  // Update a categorized customer payment
+  server.addTool({
+    name: "update_categorized_customer_payment",
+    description: `Edit a customer payment that was created via categorize_bank_transaction_as_customer_payment.
+Use get_bank_transaction to find the payment_id from a categorized bank transaction before calling this tool.
+Reconciled transactions cannot be edited; the API will return an error.`,
+    parameters: z
+      .object({
+        organization_id: optionalOrganizationIdSchema.describe(
+          "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+        ),
+        payment_id: entityIdSchema.describe(
+          "Customer payment ID (use get_bank_transaction to find from a categorized bank transaction)"
+        ),
+        customer_id: entityIdSchema.optional().describe("Customer ID"),
+        invoices: z
+          .array(customerPaymentInvoiceSchema)
+          .min(1)
+          .max(50)
+          .optional()
+          .describe("Invoices to apply the payment against"),
+        amount: moneySchema.optional().describe("Total customer payment amount"),
+        date: dateSchema.optional().describe("Payment date (YYYY-MM-DD)"),
+        account_id: entityIdSchema.optional().describe("Bank account ID receiving the payment"),
+        payment_mode: optionalShortTextSchema.describe("Payment mode such as Cash or Cheque"),
+        description: optionalTextFieldSchema.describe("Payment description"),
+        reference_number: optionalShortTextSchema.describe("Reference number"),
+        exchange_rate: exchangeRateSchema.optional().describe("Exchange rate"),
+        bank_charges: moneyOrZeroSchema.optional().describe("Bank charges"),
+      })
+      .strict(),
+    annotations: {
+      title: "Update Categorized Customer Payment",
+      readOnlyHint: false,
+      openWorldHint: true,
+    },
+    execute: async (args) => {
+      const { organization_id, payment_id, ...fields } = args
+
+      if (Object.values(fields).every((v) => v === undefined || v === null)) {
+        return "**Validation Error**: At least one updatable field must be provided (beyond payment_id)."
+      }
+
+      const payload: Record<string, unknown> = {}
+      if (fields.customer_id !== undefined) payload.customer_id = fields.customer_id
+      if (fields.invoices !== undefined) payload.invoices = fields.invoices
+      if (fields.amount !== undefined) payload.amount = fields.amount
+      if (fields.date !== undefined) payload.date = fields.date
+      if (fields.account_id !== undefined) payload.account_id = fields.account_id
+      if (fields.payment_mode !== undefined) payload.payment_mode = fields.payment_mode
+      if (fields.description !== undefined) payload.description = fields.description
+      if (fields.reference_number !== undefined) payload.reference_number = fields.reference_number
+      if (fields.exchange_rate !== undefined) payload.exchange_rate = fields.exchange_rate
+      if (fields.bank_charges !== undefined) payload.bank_charges = fields.bank_charges
+
+      const result = await zohoPut<{ message?: string }>(
+        `/customerpayments/${payment_id}`,
+        organization_id,
+        payload
+      )
+
+      if (!result.ok) {
+        return result.errorMessage || "Failed to update categorized customer payment"
+      }
+
+      return `**Success**: Categorized customer payment updated
+- **Payment ID**: \`${payment_id}\``
     },
   })
 

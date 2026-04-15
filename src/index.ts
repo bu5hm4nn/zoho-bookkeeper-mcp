@@ -60,6 +60,9 @@ You do NOT need to call list_organizations first - just use the tools directly.
 - get_bank_transaction_matches, match_bank_transaction, unmatch_bank_transaction
 - categorize_bank_transaction_generic, categorize_bank_transaction_as_expense
 - categorize_bank_transaction_as_vendor_payment, categorize_bank_transaction_as_customer_payment
+- get_bank_transaction, update_categorized_bank_transaction
+- update_categorized_expense, update_categorized_vendor_payment
+- update_categorized_customer_payment
 - uncategorize_bank_transaction
 
 ### Organizations (rarely needed)

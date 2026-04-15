@@ -278,6 +278,56 @@ export interface BankTransaction {
   debit_or_credit: "debit" | "credit"
 }
 
+export interface BankTransactionDetail {
+  transaction_id: string
+  date: string
+  amount: number
+  transaction_type: string
+  status: string
+  source?: string
+  account_id?: string
+  account_name?: string
+  from_account_id?: string
+  to_account_id?: string
+  reference_number?: string
+  description?: string
+  payee?: string
+  customer_id?: string
+  vendor_id?: string
+  currency_id?: string
+  currency_code?: string
+  offset_account_name?: string
+  imported_transaction_id?: string
+  imported_transactions?: ImportedTransaction[]
+  line_items?: BankTransactionLineItem[]
+  payment_mode?: string
+  exchange_rate?: number
+  bank_charges?: number
+  is_rule_exist?: boolean
+  rule_details?: string[]
+  debit_or_credit: "debit" | "credit"
+  associated_entity_id?: string
+}
+
+export interface ImportedTransaction {
+  imported_transaction_id?: string
+  date?: string
+  amount?: number
+  payee?: string
+  description?: string
+  debit_or_credit?: "debit" | "credit"
+  status?: string
+}
+
+export interface BankTransactionLineItem {
+  line_item_id?: string
+  account_id?: string
+  account_name?: string
+  description?: string
+  amount?: number
+  debit_or_credit?: "debit" | "credit"
+}
+
 export interface MatchingTransaction {
   transaction_id: string
   date: string
@@ -288,6 +338,47 @@ export interface MatchingTransaction {
   transaction_number?: string
   contact_name?: string
   is_best_match?: boolean
+}
+
+// Vendor Payment
+export interface VendorPayment {
+  payment_id: string
+  vendor_id?: string
+  vendor_name?: string
+  amount?: number
+  date?: string
+  paid_through_account_id?: string
+  payment_mode?: string
+  reference_number?: string
+  description?: string
+  exchange_rate?: number
+  is_paid_via_print_check?: boolean
+  bills?: Array<{
+    bill_id: string
+    amount_applied: number
+    tax_amount_withheld?: number
+  }>
+}
+
+// Customer Payment
+export interface CustomerPayment {
+  payment_id: string
+  customer_id?: string
+  customer_name?: string
+  amount?: number
+  date?: string
+  account_id?: string
+  payment_mode?: string
+  reference_number?: string
+  description?: string
+  exchange_rate?: number
+  bank_charges?: number
+  invoices?: Array<{
+    invoice_id: string
+    amount_applied: number
+    tax_amount_withheld?: number
+    discount_amount?: number
+  }>
 }
 
 // Attachment

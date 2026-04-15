@@ -1204,6 +1204,475 @@ describe("MCP Tools", () => {
       })
     })
 
+    describe("get_bank_transaction", () => {
+      it("gets bank transaction details successfully", async () => {
+        mockZohoGet.mockResolvedValue({
+          ok: true,
+          data: {
+            banktransaction: {
+              transaction_id: "banktx-123",
+              date: "2024-01-15",
+              amount: 150,
+              transaction_type: "deposit",
+              status: "categorized",
+              source: "manually_added",
+              payee: "Test Payee",
+              reference_number: "REF-123",
+              description: "Test deposit",
+              currency_code: "USD",
+              debit_or_credit: "credit",
+              from_account_id: "acc-income",
+              to_account_id: "acc-bank",
+              associated_entity_id: "expense-456",
+            },
+          },
+        })
+
+        const tool = tools.get("get_bank_transaction")!
+        const result = await tool.execute({ transaction_id: "banktx-123" })
+
+        expect(result).toContain("banktx-123")
+        expect(result).toContain("deposit")
+        expect(result).toContain("categorized")
+        expect(result).toContain("acc-income")
+        expect(result).toContain("acc-bank")
+        expect(result).toContain("expense-456")
+        expect(mockZohoGet).toHaveBeenCalledWith("/banktransactions/banktx-123", undefined)
+      })
+
+      it("handles bank transaction not found", async () => {
+        mockZohoGet.mockResolvedValue({
+          ok: true,
+          data: {},
+        })
+
+        const tool = tools.get("get_bank_transaction")!
+        const result = await tool.execute({ transaction_id: "banktx-nonexistent" })
+
+        expect(result).toBe("Bank transaction not found")
+      })
+
+      it("handles API error", async () => {
+        mockZohoGet.mockResolvedValue({
+          ok: false,
+          errorMessage: "Transaction not found",
+        })
+
+        const tool = tools.get("get_bank_transaction")!
+        const result = await tool.execute({ transaction_id: "banktx-123" })
+
+        expect(result).toBe("Transaction not found")
+      })
+
+      it("handles missing error message", async () => {
+        mockZohoGet.mockResolvedValue({
+          ok: false,
+        })
+
+        const tool = tools.get("get_bank_transaction")!
+        const result = await tool.execute({ transaction_id: "banktx-123" })
+
+        expect(result).toBe("Failed to get bank transaction")
+      })
+
+      it("includes line items and imported transactions when present", async () => {
+        mockZohoGet.mockResolvedValue({
+          ok: true,
+          data: {
+            banktransaction: {
+              transaction_id: "banktx-123",
+              date: "2024-01-15",
+              amount: 500,
+              transaction_type: "expense",
+              status: "categorized",
+              debit_or_credit: "debit",
+              currency_code: "USD",
+              line_items: [
+                {
+                  line_item_id: "li-1",
+                  account_id: "acc-1",
+                  account_name: "Office Supplies",
+                  amount: 500,
+                  debit_or_credit: "debit",
+                },
+              ],
+              imported_transactions: [
+                {
+                  imported_transaction_id: "imp-1",
+                  date: "2024-01-15",
+                  amount: 500,
+                  payee: "Supplier",
+                  status: "matched",
+                },
+              ],
+            },
+          },
+        })
+
+        const tool = tools.get("get_bank_transaction")!
+        const result = await tool.execute({ transaction_id: "banktx-123" })
+
+        expect(result).toContain("Line Items")
+        expect(result).toContain("acc-1")
+        expect(result).toContain("Office Supplies")
+        expect(result).toContain("Imported Transactions")
+        expect(result).toContain("imp-1")
+      })
+    })
+
+    describe("update_categorized_bank_transaction", () => {
+      it("updates a categorized bank transaction successfully", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: true,
+          data: { message: "Bank transaction has been updated." },
+        })
+
+        const tool = tools.get("update_categorized_bank_transaction")!
+        const result = await tool.execute({
+          transaction_id: "banktx-123",
+          transaction_type: "deposit",
+          amount: 200,
+          description: "Updated deposit",
+        })
+
+        expect(result).toContain("Categorized bank transaction updated")
+        expect(result).toContain("banktx-123")
+        expect(mockZohoPut).toHaveBeenCalledWith(
+          "/banktransactions/banktx-123",
+          undefined,
+          expect.objectContaining({
+            transaction_type: "deposit",
+            amount: 200,
+            description: "Updated deposit",
+          })
+        )
+      })
+
+      it("requires at least one updatable field beyond transaction_type", async () => {
+        const tool = tools.get("update_categorized_bank_transaction")!
+        const result = await tool.execute({
+          transaction_id: "banktx-123",
+          transaction_type: "deposit",
+        })
+
+        expect(result).toContain("Validation Error")
+      })
+
+      it("returns API errors when update fails", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: false,
+          errorMessage: "Reconciled transaction cannot be edited",
+        })
+
+        const tool = tools.get("update_categorized_bank_transaction")!
+        const result = await tool.execute({
+          transaction_id: "banktx-123",
+          transaction_type: "deposit",
+          amount: 200,
+        })
+
+        expect(result).toBe("Reconciled transaction cannot be edited")
+      })
+
+      it("handles missing error message", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: false,
+        })
+
+        const tool = tools.get("update_categorized_bank_transaction")!
+        const result = await tool.execute({
+          transaction_id: "banktx-123",
+          transaction_type: "deposit",
+          amount: 200,
+        })
+
+        expect(result).toBe("Failed to update categorized bank transaction")
+      })
+
+      it("sends only provided fields in payload", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: true,
+          data: { message: "Updated" },
+        })
+
+        const tool = tools.get("update_categorized_bank_transaction")!
+        const result = await tool.execute({
+          transaction_id: "banktx-123",
+          transaction_type: "transfer_fund",
+          exchange_rate: 1.1,
+        })
+
+        expect(result).toContain("Categorized bank transaction updated")
+        expect(mockZohoPut).toHaveBeenCalledWith(
+          "/banktransactions/banktx-123",
+          undefined,
+          expect.objectContaining({
+            transaction_type: "transfer_fund",
+            exchange_rate: 1.1,
+          })
+        )
+        // Should NOT include fields that were not provided
+        const call = mockZohoPut.mock.calls[0][2] as Record<string, unknown>
+        expect(call).not.toHaveProperty("amount")
+        expect(call).not.toHaveProperty("description")
+      })
+    })
+
+    describe("update_categorized_expense", () => {
+      it("updates a categorized expense successfully", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: true,
+          data: { message: "Expense has been updated." },
+        })
+
+        const tool = tools.get("update_categorized_expense")!
+        const result = await tool.execute({
+          expense_id: "expense-456",
+          amount: 75.5,
+          description: "Updated expense",
+        })
+
+        expect(result).toContain("Categorized expense updated")
+        expect(result).toContain("expense-456")
+        expect(mockZohoPut).toHaveBeenCalledWith(
+          "/expenses/expense-456",
+          undefined,
+          expect.objectContaining({
+            amount: 75.5,
+            description: "Updated expense",
+          })
+        )
+      })
+
+      it("requires at least one updatable field", async () => {
+        const tool = tools.get("update_categorized_expense")!
+        const result = await tool.execute({
+          expense_id: "expense-456",
+        })
+
+        expect(result).toContain("Validation Error")
+      })
+
+      it("returns API errors when expense update fails", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: false,
+          errorMessage: "Expense not found",
+        })
+
+        const tool = tools.get("update_categorized_expense")!
+        const result = await tool.execute({
+          expense_id: "expense-456",
+          amount: 75.5,
+        })
+
+        expect(result).toBe("Expense not found")
+      })
+
+      it("handles missing error message", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: false,
+        })
+
+        const tool = tools.get("update_categorized_expense")!
+        const result = await tool.execute({
+          expense_id: "expense-456",
+          amount: 75.5,
+        })
+
+        expect(result).toBe("Failed to update categorized expense")
+      })
+
+      it("sends only provided fields in payload", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: true,
+          data: { message: "Updated" },
+        })
+
+        const tool = tools.get("update_categorized_expense")!
+        await tool.execute({
+          expense_id: "expense-456",
+          vendor_id: "vendor-1",
+          is_billable: true,
+        })
+
+        const call = mockZohoPut.mock.calls[0][2] as Record<string, unknown>
+        expect(call).toHaveProperty("vendor_id", "vendor-1")
+        expect(call).toHaveProperty("is_billable", true)
+        expect(call).not.toHaveProperty("amount")
+        expect(call).not.toHaveProperty("description")
+      })
+    })
+
+    describe("update_categorized_vendor_payment", () => {
+      it("updates a categorized vendor payment successfully", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: true,
+          data: { message: "Vendor payment has been updated." },
+        })
+
+        const tool = tools.get("update_categorized_vendor_payment")!
+        const result = await tool.execute({
+          payment_id: "vp-789",
+          amount: 250,
+          paid_through_account_id: "bank-acc-1",
+        })
+
+        expect(result).toContain("Categorized vendor payment updated")
+        expect(result).toContain("vp-789")
+        expect(mockZohoPut).toHaveBeenCalledWith(
+          "/vendorpayments/vp-789",
+          undefined,
+          expect.objectContaining({
+            amount: 250,
+            paid_through_account_id: "bank-acc-1",
+          })
+        )
+      })
+
+      it("requires at least one updatable field", async () => {
+        const tool = tools.get("update_categorized_vendor_payment")!
+        const result = await tool.execute({
+          payment_id: "vp-789",
+        })
+
+        expect(result).toContain("Validation Error")
+      })
+
+      it("returns API errors when vendor payment update fails", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: false,
+          errorMessage: "Payment not found",
+        })
+
+        const tool = tools.get("update_categorized_vendor_payment")!
+        const result = await tool.execute({
+          payment_id: "vp-789",
+          amount: 250,
+        })
+
+        expect(result).toBe("Payment not found")
+      })
+
+      it("handles missing error message", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: false,
+        })
+
+        const tool = tools.get("update_categorized_vendor_payment")!
+        const result = await tool.execute({
+          payment_id: "vp-789",
+          amount: 250,
+        })
+
+        expect(result).toBe("Failed to update categorized vendor payment")
+      })
+
+      it("sends bills array when provided", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: true,
+          data: { message: "Updated" },
+        })
+
+        const tool = tools.get("update_categorized_vendor_payment")!
+        await tool.execute({
+          payment_id: "vp-789",
+          bills: [
+            { bill_id: "bill-1", amount_applied: 150 },
+            { bill_id: "bill-2", amount_applied: 100 },
+          ],
+        })
+
+        const call = mockZohoPut.mock.calls[0][2] as Record<string, unknown>
+        expect(call).toHaveProperty("bills")
+        expect((call as { bills: Array<{ bill_id: string }> }).bills).toHaveLength(2)
+      })
+    })
+
+    describe("update_categorized_customer_payment", () => {
+      it("updates a categorized customer payment successfully", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: true,
+          data: { message: "Customer payment has been updated." },
+        })
+
+        const tool = tools.get("update_categorized_customer_payment")!
+        const result = await tool.execute({
+          payment_id: "cp-101",
+          amount: 300,
+          description: "Updated payment",
+        })
+
+        expect(result).toContain("Categorized customer payment updated")
+        expect(result).toContain("cp-101")
+        expect(mockZohoPut).toHaveBeenCalledWith(
+          "/customerpayments/cp-101",
+          undefined,
+          expect.objectContaining({
+            amount: 300,
+            description: "Updated payment",
+          })
+        )
+      })
+
+      it("requires at least one updatable field", async () => {
+        const tool = tools.get("update_categorized_customer_payment")!
+        const result = await tool.execute({
+          payment_id: "cp-101",
+        })
+
+        expect(result).toContain("Validation Error")
+      })
+
+      it("returns API errors when customer payment update fails", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: false,
+          errorMessage: "Payment not found",
+        })
+
+        const tool = tools.get("update_categorized_customer_payment")!
+        const result = await tool.execute({
+          payment_id: "cp-101",
+          amount: 300,
+        })
+
+        expect(result).toBe("Payment not found")
+      })
+
+      it("handles missing error message", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: false,
+        })
+
+        const tool = tools.get("update_categorized_customer_payment")!
+        const result = await tool.execute({
+          payment_id: "cp-101",
+          amount: 300,
+        })
+
+        expect(result).toBe("Failed to update categorized customer payment")
+      })
+
+      it("sends invoices array when provided", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: true,
+          data: { message: "Updated" },
+        })
+
+        const tool = tools.get("update_categorized_customer_payment")!
+        await tool.execute({
+          payment_id: "cp-101",
+          invoices: [
+            { invoice_id: "inv-1", amount_applied: 200 },
+            { invoice_id: "inv-2", amount_applied: 100, discount_amount: 10 },
+          ],
+        })
+
+        const call = mockZohoPut.mock.calls[0][2] as Record<string, unknown>
+        expect(call).toHaveProperty("invoices")
+        expect((call as { invoices: Array<{ invoice_id: string }> }).invoices).toHaveLength(2)
+      })
+    })
+
     describe("uncategorize_bank_transaction", () => {
       it("uncategorizes a bank transaction successfully", async () => {
         mockZohoPost.mockResolvedValue({
