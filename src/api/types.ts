@@ -212,6 +212,19 @@ export interface Invoice {
 }
 
 // Contact (Customer/Vendor)
+export interface ContactAddress {
+  attention?: string
+  address?: string
+  street2?: string
+  state_code?: string
+  city?: string
+  state?: string
+  zip?: string
+  country?: string
+  fax?: string
+  phone?: string
+}
+
 export interface Contact {
   contact_id: string
   contact_name: string
@@ -223,6 +236,8 @@ export interface Contact {
   currency_code?: string
   email?: string
   phone?: string
+  notes?: string
+  billing_address?: ContactAddress
   created_time?: string
   last_modified_time?: string
 }

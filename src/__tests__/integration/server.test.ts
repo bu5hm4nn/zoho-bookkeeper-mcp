@@ -30,8 +30,7 @@ describe("MCP Server", () => {
 
       // Server should have tools registered
       expect(server).toBeDefined()
-      // The exact tool count from the plan: 37 tools
-      // We can verify the server exists and is properly configured
+      // Tool count changes as the curated surface grows; verify the server loads successfully.
     })
   })
 
