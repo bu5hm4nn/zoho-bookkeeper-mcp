@@ -6,17 +6,27 @@ import { z } from "zod"
 import type { FastMCP } from "fastmcp"
 import { zohoGet, zohoPost, zohoUploadAttachment, zohoDeleteAttachment } from "../api/client.js"
 import type { Invoice, Attachment } from "../api/types.js"
-import { optionalOrganizationIdSchema } from "../utils/validation.js"
+import {
+  entityIdSchema,
+  dateSchema,
+  optionalDateSchema,
+  optionalOrganizationIdSchema,
+} from "../utils/validation.js"
 
 // Zod schema for invoice line items
-const invoiceLineItemSchema = z.object({
-  item_id: z.string().optional().describe("Item ID from Zoho Books items catalog"),
-  name: z.string().optional().describe("Item name (used if item_id not provided)"),
-  description: z.string().optional().describe("Description for this line item"),
-  quantity: z.number().positive().default(1).describe("Quantity (default 1)"),
-  rate: z.number().positive().describe("Unit price / rate"),
-  tax_id: z.string().optional().describe("Tax ID if applicable"),
-})
+const invoiceLineItemSchema = z
+  .object({
+    item_id: entityIdSchema.optional().describe("Item ID from Zoho Books items catalog"),
+    name: z.string().max(200).optional().describe("Item name (used if item_id not provided)"),
+    description: z.string().max(2000).optional().describe("Description for this line item"),
+    quantity: z.number().positive().default(1).describe("Quantity (default 1)"),
+    rate: z.number().positive().describe("Unit price / rate"),
+    tax_id: entityIdSchema.optional().describe("Tax ID if applicable"),
+  })
+  .strict()
+  .refine((item) => item.item_id || item.name, {
+    message: "Either item_id or name is required for each line item",
+  })
 
 /**
  * Register invoice tools on the server
@@ -156,19 +166,31 @@ Returns full invoice details including line items and customer info.`,
 Use list_contacts to find customer_id values.
 Optionally use item_id for catalog items, or provide name and rate for ad-hoc line items.
 Set is_draft=true to save without sending.`,
-    parameters: z.object({
-      organization_id: optionalOrganizationIdSchema.describe(
-        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
-      ),
-      customer_id: z.string().describe("Customer ID"),
-      date: z.string().describe("Invoice date (YYYY-MM-DD)"),
-      due_date: z.string().optional().describe("Payment due date (YYYY-MM-DD)"),
-      payment_terms: z.number().int().optional().describe("Payment terms in days (e.g., 30 for Net 30)"),
-      reference_number: z.string().optional().describe("Reference number"),
-      notes: z.string().optional().describe("Customer notes"),
-      is_draft: z.boolean().optional().default(false).describe("Save as draft without sending (default false)"),
-      line_items: z.array(invoiceLineItemSchema).min(1).describe("Array of line items"),
-    }),
+    parameters: z
+      .object({
+        organization_id: optionalOrganizationIdSchema.describe(
+          "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+        ),
+        customer_id: entityIdSchema.describe("Customer ID"),
+        date: dateSchema.describe("Invoice date (YYYY-MM-DD)"),
+        due_date: optionalDateSchema.describe("Payment due date (YYYY-MM-DD)"),
+        payment_terms: z
+          .number()
+          .int()
+          .min(0)
+          .max(3650)
+          .optional()
+          .describe("Payment terms in days (e.g., 30 for Net 30)"),
+        reference_number: z.string().max(100).optional().describe("Reference number"),
+        notes: z.string().max(2000).optional().describe("Customer notes"),
+        is_draft: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe("Save as draft without sending (default false)"),
+        line_items: z.array(invoiceLineItemSchema).min(1).max(50).describe("Array of line items"),
+      })
+      .strict(),
     annotations: {
       title: "Create Invoice",
       readOnlyHint: false,
@@ -188,11 +210,7 @@ Set is_draft=true to save without sending.`,
 
       const endpoint = args.is_draft ? "/invoices?status=draft" : "/invoices"
 
-      const result = await zohoPost<{ invoice: Invoice }>(
-        endpoint,
-        args.organization_id,
-        payload
-      )
+      const result = await zohoPost<{ invoice: Invoice }>(endpoint, args.organization_id, payload)
 
       if (!result.ok) {
         return result.errorMessage || "Failed to create invoice"

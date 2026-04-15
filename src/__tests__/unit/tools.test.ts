@@ -11,19 +11,23 @@ vi.mock("../../api/client.js", () => ({
   zohoGet: vi.fn(),
   zohoPost: vi.fn(),
   zohoPut: vi.fn(),
+  zohoDelete: vi.fn(),
 }))
 
-import { zohoListOrganizations, zohoGet, zohoPost, zohoPut } from "../../api/client.js"
+import { zohoListOrganizations, zohoGet, zohoPost, zohoPut, zohoDelete } from "../../api/client.js"
 import { registerOrganizationTools } from "../../tools/organizations.js"
 import { registerContactTools } from "../../tools/contacts.js"
 import { registerVendorTools } from "../../tools/vendors.js"
 import { registerChartOfAccountsTools } from "../../tools/chart-of-accounts.js"
 import { registerBankAccountTools } from "../../tools/bank-accounts.js"
+import { registerExpenseTools } from "../../tools/expenses.js"
+import { registerInvoiceTools } from "../../tools/invoices.js"
 
 const mockZohoListOrganizations = vi.mocked(zohoListOrganizations)
 const mockZohoGet = vi.mocked(zohoGet)
 const mockZohoPost = vi.mocked(zohoPost)
 const mockZohoPut = vi.mocked(zohoPut)
+const mockZohoDelete = vi.mocked(zohoDelete)
 
 describe("MCP Tools", () => {
   let server: FastMCP
@@ -1241,6 +1245,221 @@ describe("MCP Tools", () => {
         })
 
         expect(result).toBe("Transaction cannot be uncategorized")
+      })
+    })
+  })
+
+  describe("Expense Tools", () => {
+    beforeEach(() => {
+      registerExpenseTools(server)
+    })
+
+    describe("create_expense", () => {
+      it("creates a regular expense successfully", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: true,
+          data: {
+            expense: {
+              expense_id: "exp-123",
+              date: "2024-03-15",
+              amount: 150.0,
+              currency_code: "USD",
+              account_id: "acc-1",
+              paid_through_account_id: "bank-1",
+            },
+          },
+        })
+
+        const tool = tools.get("create_expense")!
+        const result = await tool.execute({
+          account_id: "acc-1",
+          paid_through_account_id: "bank-1",
+          date: "2024-03-15",
+          amount: 150.0,
+        })
+
+        expect(result).toContain("Expense Created Successfully")
+        expect(result).toContain("exp-123")
+        expect(result).toContain("150")
+      })
+
+      it("creates a mileage expense successfully", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: true,
+          data: {
+            expense: {
+              expense_id: "exp-456",
+              date: "2024-03-15",
+              amount: 36.25,
+              currency_code: "USD",
+              distance: 50,
+              mileage_unit: "mile",
+            },
+          },
+        })
+
+        const tool = tools.get("create_expense")!
+        const result = await tool.execute({
+          account_id: "acc-1",
+          paid_through_account_id: "bank-1",
+          date: "2024-03-15",
+          mileage_type: "manual",
+          distance: 50,
+          mileage_unit: "mile",
+          mileage_rate: 0.725,
+        })
+
+        expect(result).toContain("Expense Created Successfully")
+        expect(result).toContain("exp-456")
+        expect(result).toContain("Distance")
+        expect(result).toContain("50")
+      })
+
+      it("returns API errors when creation fails", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: false,
+          errorMessage: "Invalid account",
+        })
+
+        const tool = tools.get("create_expense")!
+        const result = await tool.execute({
+          account_id: "acc-1",
+          paid_through_account_id: "bank-1",
+          date: "2024-03-15",
+          amount: 100,
+        })
+
+        expect(result).toBe("Invalid account")
+      })
+    })
+
+    describe("update_expense", () => {
+      it("updates an expense successfully", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: true,
+          data: {
+            expense: {
+              expense_id: "exp-123",
+              date: "2024-03-15",
+              amount: 200.0,
+              currency_code: "USD",
+            },
+          },
+        })
+
+        const tool = tools.get("update_expense")!
+        const result = await tool.execute({
+          expense_id: "exp-123",
+          amount: 200.0,
+        })
+
+        expect(result).toContain("Expense Updated Successfully")
+        expect(result).toContain("exp-123")
+        expect(result).toContain("200")
+      })
+
+      it("returns API errors when update fails", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: false,
+          errorMessage: "Expense not found",
+        })
+
+        const tool = tools.get("update_expense")!
+        const result = await tool.execute({
+          expense_id: "exp-999",
+          amount: 100,
+        })
+
+        expect(result).toBe("Expense not found")
+      })
+    })
+
+    describe("delete_expense", () => {
+      it("deletes an expense successfully", async () => {
+        mockZohoDelete.mockResolvedValue({
+          ok: true,
+          data: {},
+        })
+
+        const tool = tools.get("delete_expense")!
+        const result = await tool.execute({
+          expense_id: "exp-123",
+        })
+
+        expect(result).toContain("Expense Deleted Successfully")
+        expect(result).toContain("exp-123")
+      })
+
+      it("returns API errors when delete fails", async () => {
+        mockZohoDelete.mockResolvedValue({
+          ok: false,
+          errorMessage: "Expense cannot be deleted",
+        })
+
+        const tool = tools.get("delete_expense")!
+        const result = await tool.execute({
+          expense_id: "exp-123",
+        })
+
+        expect(result).toBe("Expense cannot be deleted")
+      })
+    })
+  })
+
+  describe("Invoice Tools", () => {
+    beforeEach(() => {
+      registerInvoiceTools(server)
+    })
+
+    describe("create_invoice", () => {
+      it("creates an invoice successfully", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: true,
+          data: {
+            invoice: {
+              invoice_id: "inv-123",
+              invoice_number: "INV-001",
+              customer_id: "cust-1",
+              customer_name: "Test Customer",
+              date: "2024-03-15",
+              due_date: "2024-04-14",
+              total: 500.0,
+              currency_code: "USD",
+              status: "draft",
+            },
+          },
+        })
+
+        const tool = tools.get("create_invoice")!
+        const result = await tool.execute({
+          customer_id: "cust-1",
+          date: "2024-03-15",
+          due_date: "2024-04-14",
+          is_draft: true,
+          line_items: [{ name: "Consulting", rate: 500, quantity: 1 }],
+        })
+
+        expect(result).toContain("Invoice Created Successfully")
+        expect(result).toContain("inv-123")
+        expect(result).toContain("INV-001")
+        expect(result).toContain("Test Customer")
+        expect(result).toContain("500")
+      })
+
+      it("returns API errors when creation fails", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: false,
+          errorMessage: "Customer not found",
+        })
+
+        const tool = tools.get("create_invoice")!
+        const result = await tool.execute({
+          customer_id: "cust-999",
+          date: "2024-03-15",
+          line_items: [{ name: "Service", rate: 100, quantity: 1 }],
+        })
+
+        expect(result).toBe("Customer not found")
       })
     })
   })

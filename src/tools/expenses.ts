@@ -4,7 +4,14 @@
 
 import { z } from "zod"
 import type { FastMCP } from "fastmcp"
-import { zohoGet, zohoPost, zohoPut, zohoDelete, zohoUploadAttachment, zohoDeleteAttachment } from "../api/client.js"
+import {
+  zohoGet,
+  zohoPost,
+  zohoPut,
+  zohoDelete,
+  zohoUploadAttachment,
+  zohoDeleteAttachment,
+} from "../api/client.js"
 import type { Expense, Attachment } from "../api/types.js"
 import {
   moneySchema,
@@ -145,52 +152,119 @@ Use list_accounts to find valid account IDs.
 For mileage expenses, set mileage_type to "manual" with distance + mileage_unit + mileage_rate,
 or set mileage_type to "odometer" with start_reading + end_reading + mileage_rate.
 Zoho will auto-calculate the amount from mileage fields. Do NOT provide amount for mileage expenses.`,
-    parameters: z.object({
-      organization_id: optionalOrganizationIdSchema.describe(
-        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
-      ),
-      account_id: entityIdSchema.describe("Expense account ID"),
-      paid_through_account_id: entityIdSchema.describe(
-        "Payment account ID (bank/cash/credit card)"
-      ),
-      date: dateSchema.describe("Expense date (YYYY-MM-DD)"),
-      amount: moneySchema.optional().describe(
-        "Expense amount — required for regular expenses, omit for mileage (auto-calculated)"
-      ),
-      description: z.string().max(500).optional().describe("Description of the expense"),
-      reference_number: z.string().max(100).optional().describe("Reference number"),
-      customer_id: entityIdSchema.optional().describe("Customer ID if billable"),
-      vendor_id: entityIdSchema.optional().describe("Vendor ID"),
-      is_billable: z.boolean().optional().describe("Whether expense is billable to a customer"),
-      mileage_type: z
-        .enum(["manual", "odometer"])
-        .optional()
-        .describe("Mileage type: 'manual' (enter distance) or 'odometer' (enter readings)"),
-      distance: z
-        .number()
-        .positive()
-        .optional()
-        .describe("Distance travelled (required when mileage_type is 'manual')"),
-      mileage_unit: z
-        .enum(["km", "mile"])
-        .optional()
-        .describe("Unit of distance: 'km' or 'mile'"),
-      mileage_rate: z
-        .number()
-        .positive()
-        .optional()
-        .describe("Rate per unit distance"),
-      start_reading: z
-        .number()
-        .nonnegative()
-        .optional()
-        .describe("Odometer start reading (required when mileage_type is 'odometer')"),
-      end_reading: z
-        .number()
-        .positive()
-        .optional()
-        .describe("Odometer end reading (required when mileage_type is 'odometer')"),
-    }),
+    parameters: z
+      .object({
+        organization_id: optionalOrganizationIdSchema.describe(
+          "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+        ),
+        account_id: entityIdSchema.describe("Expense account ID"),
+        paid_through_account_id: entityIdSchema.describe(
+          "Payment account ID (bank/cash/credit card)"
+        ),
+        date: dateSchema.describe("Expense date (YYYY-MM-DD)"),
+        amount: moneySchema
+          .optional()
+          .describe(
+            "Expense amount — required for regular expenses, omit for mileage (auto-calculated)"
+          ),
+        description: z.string().max(500).optional().describe("Description of the expense"),
+        reference_number: z.string().max(100).optional().describe("Reference number"),
+        customer_id: entityIdSchema.optional().describe("Customer ID if billable"),
+        vendor_id: entityIdSchema.optional().describe("Vendor ID"),
+        is_billable: z.boolean().optional().describe("Whether expense is billable to a customer"),
+        mileage_type: z
+          .enum(["manual", "odometer"])
+          .optional()
+          .describe("Mileage type: 'manual' (enter distance) or 'odometer' (enter readings)"),
+        distance: z
+          .number()
+          .positive()
+          .optional()
+          .describe("Distance travelled (required when mileage_type is 'manual')"),
+        mileage_unit: z
+          .enum(["km", "mile"])
+          .optional()
+          .describe("Unit of distance: 'km' or 'mile'"),
+        mileage_rate: z.number().positive().optional().describe("Rate per unit distance"),
+        start_reading: z
+          .number()
+          .nonnegative()
+          .optional()
+          .describe("Odometer start reading (required when mileage_type is 'odometer')"),
+        end_reading: z
+          .number()
+          .positive()
+          .optional()
+          .describe("Odometer end reading (required when mileage_type is 'odometer')"),
+      })
+      .strict()
+      .superRefine((args, ctx) => {
+        if (args.mileage_type === "manual") {
+          if (args.distance === undefined)
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "distance is required when mileage_type is 'manual'",
+              path: ["distance"],
+            })
+          if (!args.mileage_unit)
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "mileage_unit is required when mileage_type is 'manual'",
+              path: ["mileage_unit"],
+            })
+          if (args.mileage_rate === undefined)
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "mileage_rate is required when mileage_type is 'manual'",
+              path: ["mileage_rate"],
+            })
+        }
+        if (args.mileage_type === "odometer") {
+          if (args.start_reading === undefined)
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "start_reading is required when mileage_type is 'odometer'",
+              path: ["start_reading"],
+            })
+          if (args.end_reading === undefined)
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "end_reading is required when mileage_type is 'odometer'",
+              path: ["end_reading"],
+            })
+          if (args.mileage_rate === undefined)
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "mileage_rate is required when mileage_type is 'odometer'",
+              path: ["mileage_rate"],
+            })
+          if (
+            args.start_reading !== undefined &&
+            args.end_reading !== undefined &&
+            args.end_reading <= args.start_reading
+          ) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "end_reading must be greater than start_reading",
+              path: ["end_reading"],
+            })
+          }
+        }
+        if (args.mileage_type && args.amount !== undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Do not provide amount for mileage expenses — Zoho auto-calculates it",
+            path: ["amount"],
+          })
+        }
+        if (!args.mileage_type && args.amount === undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "amount is required for non-mileage expenses",
+            path: ["amount"],
+          })
+        }
+      }),
     annotations: {
       title: "Create Expense",
       readOnlyHint: false,
@@ -257,51 +331,109 @@ Only provide fields you want to change — unspecified fields remain unchanged.
 For mileage expenses, set mileage_type to "manual" with distance + mileage_unit + mileage_rate,
 or set mileage_type to "odometer" with start_reading + end_reading + mileage_rate.
 Zoho will auto-calculate the amount from mileage fields.`,
-    parameters: z.object({
-      organization_id: optionalOrganizationIdSchema.describe(
-        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
-      ),
-      expense_id: entityIdSchema.describe("Expense ID to update"),
-      account_id: entityIdSchema.optional().describe("Expense account ID"),
-      paid_through_account_id: entityIdSchema.optional().describe(
-        "Payment account ID (bank/cash/credit card)"
-      ),
-      date: dateSchema.optional().describe("Expense date (YYYY-MM-DD)"),
-      amount: moneySchema.optional().describe("Expense amount"),
-      description: z.string().max(500).optional().describe("Description of the expense"),
-      reference_number: z.string().max(100).optional().describe("Reference number"),
-      customer_id: entityIdSchema.optional().describe("Customer ID if billable"),
-      vendor_id: entityIdSchema.optional().describe("Vendor ID"),
-      is_billable: z.boolean().optional().describe("Whether expense is billable to a customer"),
-      mileage_type: z
-        .enum(["manual", "odometer"])
-        .optional()
-        .describe("Mileage type: 'manual' (enter distance) or 'odometer' (enter readings)"),
-      distance: z
-        .number()
-        .positive()
-        .optional()
-        .describe("Distance travelled (required when mileage_type is 'manual')"),
-      mileage_unit: z
-        .enum(["km", "mile"])
-        .optional()
-        .describe("Unit of distance: 'km' or 'mile'"),
-      mileage_rate: z
-        .number()
-        .positive()
-        .optional()
-        .describe("Rate per unit distance"),
-      start_reading: z
-        .number()
-        .nonnegative()
-        .optional()
-        .describe("Odometer start reading (required when mileage_type is 'odometer')"),
-      end_reading: z
-        .number()
-        .positive()
-        .optional()
-        .describe("Odometer end reading (required when mileage_type is 'odometer')"),
-    }),
+    parameters: z
+      .object({
+        organization_id: optionalOrganizationIdSchema.describe(
+          "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+        ),
+        expense_id: entityIdSchema.describe("Expense ID to update"),
+        account_id: entityIdSchema.optional().describe("Expense account ID"),
+        paid_through_account_id: entityIdSchema
+          .optional()
+          .describe("Payment account ID (bank/cash/credit card)"),
+        date: dateSchema.optional().describe("Expense date (YYYY-MM-DD)"),
+        amount: moneySchema.optional().describe("Expense amount"),
+        description: z.string().max(500).optional().describe("Description of the expense"),
+        reference_number: z.string().max(100).optional().describe("Reference number"),
+        customer_id: entityIdSchema.optional().describe("Customer ID if billable"),
+        vendor_id: entityIdSchema.optional().describe("Vendor ID"),
+        is_billable: z.boolean().optional().describe("Whether expense is billable to a customer"),
+        mileage_type: z
+          .enum(["manual", "odometer"])
+          .optional()
+          .describe("Mileage type: 'manual' (enter distance) or 'odometer' (enter readings)"),
+        distance: z
+          .number()
+          .positive()
+          .optional()
+          .describe("Distance travelled (required when mileage_type is 'manual')"),
+        mileage_unit: z
+          .enum(["km", "mile"])
+          .optional()
+          .describe("Unit of distance: 'km' or 'mile'"),
+        mileage_rate: z.number().positive().optional().describe("Rate per unit distance"),
+        start_reading: z
+          .number()
+          .nonnegative()
+          .optional()
+          .describe("Odometer start reading (required when mileage_type is 'odometer')"),
+        end_reading: z
+          .number()
+          .positive()
+          .optional()
+          .describe("Odometer end reading (required when mileage_type is 'odometer')"),
+      })
+      .strict()
+      .superRefine((args, ctx) => {
+        if (args.mileage_type === "manual") {
+          if (args.distance === undefined)
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "distance is required when mileage_type is 'manual'",
+              path: ["distance"],
+            })
+          if (!args.mileage_unit)
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "mileage_unit is required when mileage_type is 'manual'",
+              path: ["mileage_unit"],
+            })
+          if (args.mileage_rate === undefined)
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "mileage_rate is required when mileage_type is 'manual'",
+              path: ["mileage_rate"],
+            })
+        }
+        if (args.mileage_type === "odometer") {
+          if (args.start_reading === undefined)
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "start_reading is required when mileage_type is 'odometer'",
+              path: ["start_reading"],
+            })
+          if (args.end_reading === undefined)
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "end_reading is required when mileage_type is 'odometer'",
+              path: ["end_reading"],
+            })
+          if (args.mileage_rate === undefined)
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "mileage_rate is required when mileage_type is 'odometer'",
+              path: ["mileage_rate"],
+            })
+          if (
+            args.start_reading !== undefined &&
+            args.end_reading !== undefined &&
+            args.end_reading <= args.start_reading
+          ) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "end_reading must be greater than start_reading",
+              path: ["end_reading"],
+            })
+          }
+        }
+        if (args.mileage_type && args.amount !== undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Do not provide amount for mileage expenses — Zoho auto-calculates it",
+            path: ["amount"],
+          })
+        }
+      }),
     annotations: {
       title: "Update Expense",
       readOnlyHint: false,
@@ -311,7 +443,8 @@ Zoho will auto-calculate the amount from mileage fields.`,
       const payload: Record<string, unknown> = {}
 
       if (args.account_id) payload.account_id = args.account_id
-      if (args.paid_through_account_id) payload.paid_through_account_id = args.paid_through_account_id
+      if (args.paid_through_account_id)
+        payload.paid_through_account_id = args.paid_through_account_id
       if (args.date) payload.date = args.date
       if (args.amount !== undefined) payload.amount = args.amount
       if (args.description) payload.description = args.description
@@ -358,12 +491,14 @@ Zoho will auto-calculate the amount from mileage fields.`,
   server.addTool({
     name: "delete_expense",
     description: `Delete an expense record. This action cannot be undone.`,
-    parameters: z.object({
-      organization_id: optionalOrganizationIdSchema.describe(
-        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
-      ),
-      expense_id: entityIdSchema.describe("Expense ID to delete"),
-    }),
+    parameters: z
+      .object({
+        organization_id: optionalOrganizationIdSchema.describe(
+          "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+        ),
+        expense_id: entityIdSchema.describe("Expense ID to delete"),
+      })
+      .strict(),
     annotations: {
       title: "Delete Expense",
       readOnlyHint: false,
