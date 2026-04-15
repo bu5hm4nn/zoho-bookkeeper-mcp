@@ -8,5 +8,3 @@ coverage/
 .DS_Store
 .claude/
 .git-local/
-.git.bak
-.git.submodule-pointer
