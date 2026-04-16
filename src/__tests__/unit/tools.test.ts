@@ -1240,6 +1240,30 @@ describe("MCP Tools", () => {
         expect(mockZohoGet).toHaveBeenCalledWith("/banktransactions/banktx-123", undefined)
       })
 
+      it("forwards organization_id when getting bank transaction details", async () => {
+        mockZohoGet.mockResolvedValue({
+          ok: true,
+          data: {
+            banktransaction: {
+              transaction_id: "banktx-123",
+              date: "2024-01-15",
+              amount: 150,
+              transaction_type: "deposit",
+              status: "categorized",
+              debit_or_credit: "credit",
+            },
+          },
+        })
+
+        const tool = tools.get("get_bank_transaction")!
+        await tool.execute({
+          organization_id: "org-123",
+          transaction_id: "banktx-123",
+        })
+
+        expect(mockZohoGet).toHaveBeenCalledWith("/banktransactions/banktx-123", "org-123")
+      })
+
       it("handles bank transaction not found", async () => {
         mockZohoGet.mockResolvedValue({
           ok: true,
@@ -1322,6 +1346,19 @@ describe("MCP Tools", () => {
 
     describe("update_categorized_bank_transaction", () => {
       it("updates a categorized bank transaction successfully", async () => {
+        mockZohoGet.mockResolvedValue({
+          ok: true,
+          data: {
+            banktransaction: {
+              transaction_id: "banktx-123",
+              date: "2024-01-15",
+              amount: 150,
+              transaction_type: "deposit",
+              status: "categorized",
+              debit_or_credit: "credit",
+            },
+          },
+        })
         mockZohoPut.mockResolvedValue({
           ok: true,
           data: { message: "Bank transaction has been updated." },
@@ -1337,6 +1374,7 @@ describe("MCP Tools", () => {
 
         expect(result).toContain("Categorized bank transaction updated")
         expect(result).toContain("banktx-123")
+        expect(mockZohoGet).toHaveBeenCalledWith("/banktransactions/banktx-123", undefined)
         expect(mockZohoPut).toHaveBeenCalledWith(
           "/banktransactions/banktx-123",
           undefined,
@@ -1344,6 +1382,44 @@ describe("MCP Tools", () => {
             transaction_type: "deposit",
             amount: 200,
             description: "Updated deposit",
+          })
+        )
+      })
+
+      it("forwards organization_id when updating a categorized bank transaction", async () => {
+        mockZohoGet.mockResolvedValue({
+          ok: true,
+          data: {
+            banktransaction: {
+              transaction_id: "banktx-123",
+              date: "2024-01-15",
+              amount: 150,
+              transaction_type: "deposit",
+              status: "categorized",
+              debit_or_credit: "credit",
+            },
+          },
+        })
+        mockZohoPut.mockResolvedValue({
+          ok: true,
+          data: { message: "Updated" },
+        })
+
+        const tool = tools.get("update_categorized_bank_transaction")!
+        await tool.execute({
+          organization_id: "org-123",
+          transaction_id: "banktx-123",
+          transaction_type: "deposit",
+          amount: 200,
+        })
+
+        expect(mockZohoGet).toHaveBeenCalledWith("/banktransactions/banktx-123", "org-123")
+        expect(mockZohoPut).toHaveBeenCalledWith(
+          "/banktransactions/banktx-123",
+          "org-123",
+          expect.objectContaining({
+            transaction_type: "deposit",
+            amount: 200,
           })
         )
       })
@@ -1358,7 +1434,64 @@ describe("MCP Tools", () => {
         expect(result).toContain("Validation Error")
       })
 
+      it("rejects mismatched transaction_type before update", async () => {
+        mockZohoGet.mockResolvedValue({
+          ok: true,
+          data: {
+            banktransaction: {
+              transaction_id: "banktx-123",
+              date: "2024-01-15",
+              amount: 150,
+              transaction_type: "refund",
+              status: "categorized",
+              debit_or_credit: "credit",
+            },
+          },
+        })
+
+        const tool = tools.get("update_categorized_bank_transaction")!
+        const result = await tool.execute({
+          transaction_id: "banktx-123",
+          transaction_type: "deposit",
+          amount: 200,
+        })
+
+        expect(result).toContain("Validation Error")
+        expect(result).toContain("refund")
+        expect(mockZohoPut).not.toHaveBeenCalled()
+      })
+
+      it("returns preflight lookup errors when transaction fetch fails", async () => {
+        mockZohoGet.mockResolvedValue({
+          ok: false,
+          errorMessage: "Transaction not found",
+        })
+
+        const tool = tools.get("update_categorized_bank_transaction")!
+        const result = await tool.execute({
+          transaction_id: "banktx-123",
+          transaction_type: "deposit",
+          amount: 200,
+        })
+
+        expect(result).toBe("Transaction not found")
+        expect(mockZohoPut).not.toHaveBeenCalled()
+      })
+
       it("returns API errors when update fails", async () => {
+        mockZohoGet.mockResolvedValue({
+          ok: true,
+          data: {
+            banktransaction: {
+              transaction_id: "banktx-123",
+              date: "2024-01-15",
+              amount: 150,
+              transaction_type: "deposit",
+              status: "categorized",
+              debit_or_credit: "credit",
+            },
+          },
+        })
         mockZohoPut.mockResolvedValue({
           ok: false,
           errorMessage: "Reconciled transaction cannot be edited",
@@ -1375,6 +1508,19 @@ describe("MCP Tools", () => {
       })
 
       it("handles missing error message", async () => {
+        mockZohoGet.mockResolvedValue({
+          ok: true,
+          data: {
+            banktransaction: {
+              transaction_id: "banktx-123",
+              date: "2024-01-15",
+              amount: 150,
+              transaction_type: "deposit",
+              status: "categorized",
+              debit_or_credit: "credit",
+            },
+          },
+        })
         mockZohoPut.mockResolvedValue({
           ok: false,
         })
@@ -1390,6 +1536,19 @@ describe("MCP Tools", () => {
       })
 
       it("sends only provided fields in payload", async () => {
+        mockZohoGet.mockResolvedValue({
+          ok: true,
+          data: {
+            banktransaction: {
+              transaction_id: "banktx-123",
+              date: "2024-01-15",
+              amount: 150,
+              transaction_type: "transfer_fund",
+              status: "categorized",
+              debit_or_credit: "credit",
+            },
+          },
+        })
         mockZohoPut.mockResolvedValue({
           ok: true,
           data: { message: "Updated" },
@@ -1411,7 +1570,6 @@ describe("MCP Tools", () => {
             exchange_rate: 1.1,
           })
         )
-        // Should NOT include fields that were not provided
         const call = mockZohoPut.mock.calls[0][2] as Record<string, unknown>
         expect(call).not.toHaveProperty("amount")
         expect(call).not.toHaveProperty("description")
@@ -1501,6 +1659,26 @@ describe("MCP Tools", () => {
         expect(call).not.toHaveProperty("amount")
         expect(call).not.toHaveProperty("description")
       })
+
+      it("forwards organization_id when updating an expense", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: true,
+          data: { message: "Updated" },
+        })
+
+        const tool = tools.get("update_categorized_expense")!
+        await tool.execute({
+          organization_id: "org-123",
+          expense_id: "expense-456",
+          amount: 75.5,
+        })
+
+        expect(mockZohoPut).toHaveBeenCalledWith(
+          "/expenses/expense-456",
+          "org-123",
+          expect.objectContaining({ amount: 75.5 })
+        )
+      })
     })
 
     describe("update_categorized_vendor_payment", () => {
@@ -1586,6 +1764,26 @@ describe("MCP Tools", () => {
         expect(call).toHaveProperty("bills")
         expect((call as { bills: Array<{ bill_id: string }> }).bills).toHaveLength(2)
       })
+
+      it("forwards organization_id when updating a vendor payment", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: true,
+          data: { message: "Updated" },
+        })
+
+        const tool = tools.get("update_categorized_vendor_payment")!
+        await tool.execute({
+          organization_id: "org-123",
+          payment_id: "vp-789",
+          amount: 250,
+        })
+
+        expect(mockZohoPut).toHaveBeenCalledWith(
+          "/vendorpayments/vp-789",
+          "org-123",
+          expect.objectContaining({ amount: 250 })
+        )
+      })
     })
 
     describe("update_categorized_customer_payment", () => {
@@ -1670,6 +1868,26 @@ describe("MCP Tools", () => {
         const call = mockZohoPut.mock.calls[0][2] as Record<string, unknown>
         expect(call).toHaveProperty("invoices")
         expect((call as { invoices: Array<{ invoice_id: string }> }).invoices).toHaveLength(2)
+      })
+
+      it("forwards organization_id when updating a customer payment", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: true,
+          data: { message: "Updated" },
+        })
+
+        const tool = tools.get("update_categorized_customer_payment")!
+        await tool.execute({
+          organization_id: "org-123",
+          payment_id: "cp-101",
+          amount: 300,
+        })
+
+        expect(mockZohoPut).toHaveBeenCalledWith(
+          "/customerpayments/cp-101",
+          "org-123",
+          expect.objectContaining({ amount: 300 })
+        )
       })
     })
 

@@ -340,47 +340,6 @@ export interface MatchingTransaction {
   is_best_match?: boolean
 }
 
-// Vendor Payment
-export interface VendorPayment {
-  payment_id: string
-  vendor_id?: string
-  vendor_name?: string
-  amount?: number
-  date?: string
-  paid_through_account_id?: string
-  payment_mode?: string
-  reference_number?: string
-  description?: string
-  exchange_rate?: number
-  is_paid_via_print_check?: boolean
-  bills?: Array<{
-    bill_id: string
-    amount_applied: number
-    tax_amount_withheld?: number
-  }>
-}
-
-// Customer Payment
-export interface CustomerPayment {
-  payment_id: string
-  customer_id?: string
-  customer_name?: string
-  amount?: number
-  date?: string
-  account_id?: string
-  payment_mode?: string
-  reference_number?: string
-  description?: string
-  exchange_rate?: number
-  bank_charges?: number
-  invoices?: Array<{
-    invoice_id: string
-    amount_applied: number
-    tax_amount_withheld?: number
-    discount_amount?: number
-  }>
-}
-
 // Attachment
 export interface Attachment {
   document_id?: string

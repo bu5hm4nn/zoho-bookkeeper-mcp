@@ -799,7 +799,8 @@ Returns full transaction details including transaction_type, status, from/to acc
   server.addTool({
     name: "update_categorized_bank_transaction",
     description: `Edit a categorized bank transaction (deposit, refund, transfer_fund, card_payment, sales_without_invoices, expense_refund, owner_contribution, interest_income, other_income, owner_drawings, sales_return).
-You cannot change the transaction_type via this endpoint — to change category type, first uncategorize the transaction then re-categorize.
+You cannot change the transaction_type via this endpoint — this tool verifies the current type first.
+To change category type, first uncategorize the transaction then re-categorize.
 Reconciled transactions cannot be edited; the API will return an error.`,
     parameters: z
       .object({
@@ -835,8 +836,27 @@ Reconciled transactions cannot be edited; the API will return an error.`,
         return "**Validation Error**: At least one updatable field must be provided (beyond transaction_id and transaction_type)."
       }
 
+      const currentResult = await zohoGet<{ banktransaction: BankTransactionDetail }>(
+        `/banktransactions/${transaction_id}`,
+        organization_id
+      )
+
+      if (!currentResult.ok) {
+        return currentResult.errorMessage || "Failed to get bank transaction"
+      }
+
+      const currentTransaction = currentResult.data?.banktransaction
+
+      if (!currentTransaction) {
+        return "Bank transaction not found"
+      }
+
+      if (currentTransaction.transaction_type !== transaction_type) {
+        return `**Validation Error**: transaction_type must match the existing transaction type (${currentTransaction.transaction_type}). To change category type, uncategorize then re-categorize the bank transaction.`
+      }
+
       const payload: Record<string, unknown> = {
-        transaction_type: transaction_type,
+        transaction_type,
       }
       if (fields.from_account_id !== undefined) payload.from_account_id = fields.from_account_id
       if (fields.to_account_id !== undefined) payload.to_account_id = fields.to_account_id
