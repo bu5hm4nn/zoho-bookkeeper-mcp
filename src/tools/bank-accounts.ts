@@ -84,6 +84,15 @@ const customerPaymentInvoiceSchema = z
   })
   .strict()
 
+function escapeMarkdownText(value?: string): string {
+  if (!value) return "N/A"
+
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/([\\`*_{}[\]()#+.!|>-])/g, "\\$1")
+    .replace(/\r?\n/g, " ")
+}
+
 /**
  * Register bank account tools on the server
  */
@@ -754,22 +763,23 @@ Returns full transaction details including transaction_type, status, from/to acc
         ``,
         `- **Transaction ID**: \`${tx.transaction_id}\``,
         `- **Date**: ${tx.date}`,
-        `- **Type**: ${tx.transaction_type}`,
-        `- **Status**: ${tx.status}`,
-        `- **Amount**: ${tx.currency_code || ""} ${amount}`,
+        `- **Type**: ${escapeMarkdownText(tx.transaction_type)}`,
+        `- **Status**: ${escapeMarkdownText(tx.status)}`,
+        `- **Amount**: ${escapeMarkdownText(tx.currency_code) === "N/A" ? "" : escapeMarkdownText(tx.currency_code)} ${amount}`,
       ]
       if (tx.from_account_id) lines.push(`- **From Account ID**: \`${tx.from_account_id}\``)
       if (tx.to_account_id) lines.push(`- **To Account ID**: \`${tx.to_account_id}\``)
       if (tx.account_id) lines.push(`- **Account ID**: \`${tx.account_id}\``)
       if (tx.customer_id) lines.push(`- **Customer ID**: \`${tx.customer_id}\``)
       if (tx.vendor_id) lines.push(`- **Vendor ID**: \`${tx.vendor_id}\``)
-      if (tx.payment_mode) lines.push(`- **Payment Mode**: ${tx.payment_mode}`)
-      if (tx.reference_number) lines.push(`- **Reference Number**: ${tx.reference_number}`)
+      if (tx.payment_mode) lines.push(`- **Payment Mode**: ${escapeMarkdownText(tx.payment_mode)}`)
+      if (tx.reference_number)
+        lines.push(`- **Reference Number**: ${escapeMarkdownText(tx.reference_number)}`)
       if (tx.exchange_rate !== undefined) lines.push(`- **Exchange Rate**: ${tx.exchange_rate}`)
       if (tx.bank_charges !== undefined) lines.push(`- **Bank Charges**: ${tx.bank_charges}`)
-      if (tx.description) lines.push(`- **Description**: ${tx.description}`)
-      if (tx.source) lines.push(`- **Source**: ${tx.source}`)
-      if (tx.payee) lines.push(`- **Payee**: ${tx.payee}`)
+      if (tx.description) lines.push(`- **Description**: ${escapeMarkdownText(tx.description)}`)
+      if (tx.source) lines.push(`- **Source**: ${escapeMarkdownText(tx.source)}`)
+      if (tx.payee) lines.push(`- **Payee**: ${escapeMarkdownText(tx.payee)}`)
       if (tx.associated_entity_id)
         lines.push(`- **Associated Entity ID**: \`${tx.associated_entity_id}\``)
 
@@ -777,7 +787,7 @@ Returns full transaction details including transaction_type, status, from/to acc
         lines.push(``, `**Line Items**:`)
         tx.line_items.forEach((item, i) => {
           lines.push(
-            `  ${i + 1}. Account: \`${item.account_id || "N/A"}\` (${item.account_name || "N/A"}) | Amount: ${item.amount || 0} | ${item.debit_or_credit || "N/A"}`
+            `  ${i + 1}. Account: \`${item.account_id || "N/A"}\` (${escapeMarkdownText(item.account_name)}) | Amount: ${item.amount || 0} | ${escapeMarkdownText(item.debit_or_credit)}`
           )
         })
       }
@@ -786,7 +796,7 @@ Returns full transaction details including transaction_type, status, from/to acc
         lines.push(``, `**Imported Transactions**:`)
         tx.imported_transactions.forEach((imp, i) => {
           lines.push(
-            `  ${i + 1}. ID: \`${imp.imported_transaction_id || "N/A"}\` | Date: ${imp.date || "N/A"} | Amount: ${imp.amount || 0} | Payee: ${imp.payee || "N/A"} | Status: ${imp.status || "N/A"}`
+            `  ${i + 1}. ID: \`${imp.imported_transaction_id || "N/A"}\` | Date: ${imp.date || "N/A"} | Amount: ${imp.amount || 0} | Payee: ${escapeMarkdownText(imp.payee)} | Status: ${escapeMarkdownText(imp.status)}`
           )
         })
       }

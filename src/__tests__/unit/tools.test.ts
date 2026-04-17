@@ -1342,6 +1342,52 @@ describe("MCP Tools", () => {
         expect(result).toContain("Imported Transactions")
         expect(result).toContain("imp-1")
       })
+
+      it("escapes markdown-sensitive bank transaction detail fields", async () => {
+        mockZohoGet.mockResolvedValue({
+          ok: true,
+          data: {
+            banktransaction: {
+              transaction_id: "banktx-123",
+              date: "2024-01-15",
+              amount: 500,
+              transaction_type: "expense_refund",
+              status: "categorized",
+              debit_or_credit: "debit",
+              currency_code: "U[S]D",
+              description: "**urgent**\nreview",
+              payee: "Vendor [One]",
+              payment_mode: "Cash > Card",
+              line_items: [
+                {
+                  account_id: "acc-1",
+                  account_name: "Office [Supplies]",
+                  amount: 500,
+                  debit_or_credit: "debit",
+                },
+              ],
+              imported_transactions: [
+                {
+                  imported_transaction_id: "imp-1",
+                  payee: "A * Supplier",
+                  status: "matched]",
+                },
+              ],
+            },
+          },
+        })
+
+        const tool = tools.get("get_bank_transaction")!
+        const result = await tool.execute({ transaction_id: "banktx-123" })
+
+        expect(result).toContain(String.raw`U\[S\]D`)
+        expect(result).toContain(String.raw`\*\*urgent\*\* review`)
+        expect(result).toContain(String.raw`Vendor \[One\]`)
+        expect(result).toContain(String.raw`Cash \> Card`)
+        expect(result).toContain(String.raw`Office \[Supplies\]`)
+        expect(result).toContain(String.raw`A \* Supplier`)
+        expect(result).toContain(String.raw`matched\]`)
+      })
     })
 
     describe("update_categorized_bank_transaction", () => {
