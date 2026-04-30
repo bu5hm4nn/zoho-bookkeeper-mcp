@@ -1331,6 +1331,97 @@ describe("MCP Tools", () => {
 
         expect(result).toBe("Invalid account")
       })
+
+      describe("schema validation", () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const getSchema = () => (tools.get("create_expense") as any).parameters
+
+        it("rejects unknown keys (strict)", () => {
+          const { success } = getSchema().safeParse({
+            account_id: "acc-1",
+            paid_through_account_id: "bank-1",
+            date: "2024-03-15",
+            amount: 100,
+            unknown_key: true,
+          })
+          expect(success).toBe(false)
+        })
+
+        it("requires amount for non-mileage expense", () => {
+          const result = getSchema().safeParse({
+            account_id: "acc-1",
+            paid_through_account_id: "bank-1",
+            date: "2024-03-15",
+          })
+          expect(result.success).toBe(false)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const messages = result.error.issues.map((i: any) => i.message).join(" ")
+          expect(messages).toContain("amount is required")
+        })
+
+        it("rejects amount when mileage_type is set", () => {
+          const result = getSchema().safeParse({
+            account_id: "acc-1",
+            paid_through_account_id: "bank-1",
+            date: "2024-03-15",
+            mileage_type: "manual",
+            distance: 50,
+            mileage_unit: "mile",
+            mileage_rate: 0.67,
+            amount: 100,
+          })
+          expect(result.success).toBe(false)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const messages = result.error.issues.map((i: any) => i.message).join(" ")
+          expect(messages).toContain("Do not provide amount for mileage expenses")
+        })
+
+        it("requires distance, mileage_unit, and mileage_rate for manual mileage", () => {
+          const result = getSchema().safeParse({
+            account_id: "acc-1",
+            paid_through_account_id: "bank-1",
+            date: "2024-03-15",
+            mileage_type: "manual",
+          })
+          expect(result.success).toBe(false)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const messages = result.error.issues.map((i: any) => i.message).join(" ")
+          expect(messages).toContain("distance is required")
+          expect(messages).toContain("mileage_unit is required")
+          expect(messages).toContain("mileage_rate is required")
+        })
+
+        it("requires start_reading, end_reading, and mileage_rate for odometer mileage", () => {
+          const result = getSchema().safeParse({
+            account_id: "acc-1",
+            paid_through_account_id: "bank-1",
+            date: "2024-03-15",
+            mileage_type: "odometer",
+          })
+          expect(result.success).toBe(false)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const messages = result.error.issues.map((i: any) => i.message).join(" ")
+          expect(messages).toContain("start_reading is required")
+          expect(messages).toContain("end_reading is required")
+          expect(messages).toContain("mileage_rate is required")
+        })
+
+        it("rejects end_reading <= start_reading for odometer mileage", () => {
+          const result = getSchema().safeParse({
+            account_id: "acc-1",
+            paid_through_account_id: "bank-1",
+            date: "2024-03-15",
+            mileage_type: "odometer",
+            start_reading: 10000,
+            end_reading: 10000,
+            mileage_rate: 0.67,
+          })
+          expect(result.success).toBe(false)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const messages = result.error.issues.map((i: any) => i.message).join(" ")
+          expect(messages).toContain("end_reading must be greater than start_reading")
+        })
+      })
     })
 
     describe("update_expense", () => {
@@ -1382,6 +1473,75 @@ describe("MCP Tools", () => {
 
         expect(result).toBe("Expense not found")
       })
+
+      describe("schema validation", () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const getSchema = () => (tools.get("update_expense") as any).parameters
+
+        it("rejects unknown keys (strict)", () => {
+          const { success } = getSchema().safeParse({
+            expense_id: "exp-1",
+            amount: 100,
+            unknown_key: true,
+          })
+          expect(success).toBe(false)
+        })
+
+        it("rejects amount when mileage_type is set", () => {
+          const result = getSchema().safeParse({
+            expense_id: "exp-1",
+            mileage_type: "manual",
+            distance: 50,
+            mileage_unit: "mile",
+            mileage_rate: 0.67,
+            amount: 100,
+          })
+          expect(result.success).toBe(false)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const messages = result.error.issues.map((i: any) => i.message).join(" ")
+          expect(messages).toContain("Do not provide amount for mileage expenses")
+        })
+
+        it("requires distance, mileage_unit, and mileage_rate for manual mileage update", () => {
+          const result = getSchema().safeParse({
+            expense_id: "exp-1",
+            mileage_type: "manual",
+          })
+          expect(result.success).toBe(false)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const messages = result.error.issues.map((i: any) => i.message).join(" ")
+          expect(messages).toContain("distance is required")
+          expect(messages).toContain("mileage_unit is required")
+          expect(messages).toContain("mileage_rate is required")
+        })
+
+        it("requires start_reading, end_reading, and mileage_rate for odometer mileage update", () => {
+          const result = getSchema().safeParse({
+            expense_id: "exp-1",
+            mileage_type: "odometer",
+          })
+          expect(result.success).toBe(false)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const messages = result.error.issues.map((i: any) => i.message).join(" ")
+          expect(messages).toContain("start_reading is required")
+          expect(messages).toContain("end_reading is required")
+          expect(messages).toContain("mileage_rate is required")
+        })
+
+        it("rejects end_reading <= start_reading for odometer mileage update", () => {
+          const result = getSchema().safeParse({
+            expense_id: "exp-1",
+            mileage_type: "odometer",
+            start_reading: 5000,
+            end_reading: 4999,
+            mileage_rate: 0.67,
+          })
+          expect(result.success).toBe(false)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const messages = result.error.issues.map((i: any) => i.message).join(" ")
+          expect(messages).toContain("end_reading must be greater than start_reading")
+        })
+      })
     })
 
     describe("delete_expense", () => {
@@ -1412,6 +1572,18 @@ describe("MCP Tools", () => {
         })
 
         expect(result).toBe("Expense cannot be deleted")
+      })
+
+      describe("schema validation", () => {
+        it("rejects unknown keys (strict)", () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const schema = (tools.get("delete_expense") as any).parameters
+          const { success } = schema.safeParse({
+            expense_id: "exp-1",
+            unknown_field: true,
+          })
+          expect(success).toBe(false)
+        })
       })
     })
   })
@@ -1470,6 +1642,42 @@ describe("MCP Tools", () => {
         })
 
         expect(result).toBe("Customer not found")
+      })
+
+      describe("schema validation", () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const getSchema = () => (tools.get("create_invoice") as any).parameters
+
+        it("rejects unknown keys in invoice (strict)", () => {
+          const { success } = getSchema().safeParse({
+            customer_id: "cust-1",
+            date: "2024-03-15",
+            line_items: [{ name: "Service", rate: 100 }],
+            unknown_field: true,
+          })
+          expect(success).toBe(false)
+        })
+
+        it("rejects line items without item_id or name", () => {
+          const result = getSchema().safeParse({
+            customer_id: "cust-1",
+            date: "2024-03-15",
+            line_items: [{ rate: 100, quantity: 1 }],
+          })
+          expect(result.success).toBe(false)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const messages = result.error.issues.map((i: any) => i.message).join(" ")
+          expect(messages).toContain("Either item_id or name is required")
+        })
+
+        it("rejects unknown keys in line items (strict)", () => {
+          const { success } = getSchema().safeParse({
+            customer_id: "cust-1",
+            date: "2024-03-15",
+            line_items: [{ name: "Service", rate: 100, bad_key: true }],
+          })
+          expect(success).toBe(false)
+        })
       })
     })
   })
