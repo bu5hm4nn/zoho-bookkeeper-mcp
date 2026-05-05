@@ -1618,7 +1618,7 @@ describe("MCP Tools", () => {
           date: "2024-03-15",
           due_date: "2024-04-14",
           is_draft: true,
-          line_items: [{ name: "Consulting", rate: 500, quantity: 1 }],
+          line_items: [{ item_id: "item-1", name: "Consulting", rate: 500, quantity: 1 }],
         })
 
         expect(result).toContain("Invoice Created Successfully")
@@ -1638,7 +1638,7 @@ describe("MCP Tools", () => {
         const result = await tool.execute({
           customer_id: "cust-999",
           date: "2024-03-15",
-          line_items: [{ name: "Service", rate: 100, quantity: 1 }],
+          line_items: [{ item_id: "item-1", name: "Service", rate: 100, quantity: 1 }],
         })
 
         expect(result).toBe("Customer not found")
@@ -1652,29 +1652,29 @@ describe("MCP Tools", () => {
           const { success } = getSchema().safeParse({
             customer_id: "cust-1",
             date: "2024-03-15",
-            line_items: [{ name: "Service", rate: 100 }],
+            line_items: [{ item_id: "item-1", name: "Service", rate: 100 }],
             unknown_field: true,
           })
           expect(success).toBe(false)
         })
 
-        it("rejects line items without item_id or name", () => {
+        it("rejects line items without item_id", () => {
           const result = getSchema().safeParse({
             customer_id: "cust-1",
             date: "2024-03-15",
-            line_items: [{ rate: 100, quantity: 1 }],
+            line_items: [{ name: "Service", rate: 100, quantity: 1 }],
           })
           expect(result.success).toBe(false)
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const messages = result.error.issues.map((i: any) => i.message).join(" ")
-          expect(messages).toContain("Either item_id or name is required")
+          const paths = result.error.issues.map((i: any) => i.path.join("."))
+          expect(paths).toContain("line_items.0.item_id")
         })
 
         it("rejects unknown keys in line items (strict)", () => {
           const { success } = getSchema().safeParse({
             customer_id: "cust-1",
             date: "2024-03-15",
-            line_items: [{ name: "Service", rate: 100, bad_key: true }],
+            line_items: [{ item_id: "item-1", name: "Service", rate: 100, bad_key: true }],
           })
           expect(success).toBe(false)
         })
