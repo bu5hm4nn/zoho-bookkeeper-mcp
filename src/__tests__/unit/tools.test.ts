@@ -11,19 +11,23 @@ vi.mock("../../api/client.js", () => ({
   zohoGet: vi.fn(),
   zohoPost: vi.fn(),
   zohoPut: vi.fn(),
+  zohoDelete: vi.fn(),
 }))
 
-import { zohoListOrganizations, zohoGet, zohoPost, zohoPut } from "../../api/client.js"
+import { zohoListOrganizations, zohoGet, zohoPost, zohoPut, zohoDelete } from "../../api/client.js"
 import { registerOrganizationTools } from "../../tools/organizations.js"
 import { registerContactTools } from "../../tools/contacts.js"
 import { registerVendorTools } from "../../tools/vendors.js"
 import { registerChartOfAccountsTools } from "../../tools/chart-of-accounts.js"
 import { registerBankAccountTools } from "../../tools/bank-accounts.js"
+import { registerExpenseTools } from "../../tools/expenses.js"
+import { registerInvoiceTools } from "../../tools/invoices.js"
 
 const mockZohoListOrganizations = vi.mocked(zohoListOrganizations)
 const mockZohoGet = vi.mocked(zohoGet)
 const mockZohoPost = vi.mocked(zohoPost)
 const mockZohoPut = vi.mocked(zohoPut)
+const mockZohoDelete = vi.mocked(zohoDelete)
 
 describe("MCP Tools", () => {
   let server: FastMCP
@@ -1241,6 +1245,598 @@ describe("MCP Tools", () => {
         })
 
         expect(result).toBe("Transaction cannot be uncategorized")
+      })
+    })
+  })
+
+  describe("Expense Tools", () => {
+    beforeEach(() => {
+      registerExpenseTools(server)
+    })
+
+    describe("create_expense", () => {
+      it("creates a regular expense successfully", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: true,
+          data: {
+            expense: {
+              expense_id: "exp-123",
+              date: "2024-03-15",
+              amount: 150.0,
+              currency_code: "USD",
+              account_id: "acc-1",
+              paid_through_account_id: "bank-1",
+            },
+          },
+        })
+
+        const tool = tools.get("create_expense")!
+        const result = await tool.execute({
+          account_id: "acc-1",
+          paid_through_account_id: "bank-1",
+          date: "2024-03-15",
+          amount: 150.0,
+        })
+
+        expect(result).toContain("Expense Created Successfully")
+        expect(result).toContain("exp-123")
+        expect(result).toContain("150")
+      })
+
+      it("returns API errors when creation fails", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: false,
+          errorMessage: "Invalid account",
+        })
+
+        const tool = tools.get("create_expense")!
+        const result = await tool.execute({
+          account_id: "acc-1",
+          paid_through_account_id: "bank-1",
+          date: "2024-03-15",
+          amount: 100,
+        })
+
+        expect(result).toBe("Invalid account")
+      })
+
+      describe("schema validation", () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const getSchema = () => (tools.get("create_expense") as any).parameters
+
+        it("rejects unknown keys (strict)", () => {
+          const { success } = getSchema().safeParse({
+            account_id: "acc-1",
+            paid_through_account_id: "bank-1",
+            date: "2024-03-15",
+            amount: 100,
+            unknown_key: true,
+          })
+          expect(success).toBe(false)
+        })
+
+        it("requires amount for regular expense", () => {
+          const result = getSchema().safeParse({
+            account_id: "acc-1",
+            paid_through_account_id: "bank-1",
+            date: "2024-03-15",
+          })
+          expect(result.success).toBe(false)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const paths = result.error.issues.map((i: any) => i.path.join("."))
+          expect(paths).toContain("amount")
+        })
+
+        it("rejects mileage fields on the regular expense tool", () => {
+          const { success } = getSchema().safeParse({
+            account_id: "acc-1",
+            paid_through_account_id: "bank-1",
+            date: "2024-03-15",
+            amount: 100,
+            mileage_type: "manual",
+          })
+          expect(success).toBe(false)
+        })
+      })
+    })
+
+    describe("create_mileage_expense", () => {
+      it("creates a mileage expense successfully", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: true,
+          data: {
+            expense: {
+              expense_id: "exp-456",
+              date: "2024-03-15",
+              amount: 36.25,
+              currency_code: "USD",
+              distance: 50,
+              mileage_unit: "mile",
+            },
+          },
+        })
+
+        const tool = tools.get("create_mileage_expense")!
+        const result = await tool.execute({
+          account_id: "acc-1",
+          paid_through_account_id: "bank-1",
+          date: "2024-03-15",
+          mileage_type: "manual",
+          distance: 50,
+          mileage_unit: "mile",
+          mileage_rate: 0.725,
+        })
+
+        expect(result).toContain("Mileage Expense Created Successfully")
+        expect(result).toContain("exp-456")
+        expect(result).toContain("Distance")
+        expect(result).toContain("50")
+      })
+
+      it("returns API errors when mileage creation fails", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: false,
+          errorMessage: "Invalid mileage expense",
+        })
+
+        const tool = tools.get("create_mileage_expense")!
+        const result = await tool.execute({
+          account_id: "acc-1",
+          paid_through_account_id: "bank-1",
+          date: "2024-03-15",
+          mileage_type: "manual",
+          distance: 50,
+          mileage_unit: "mile",
+          mileage_rate: 0.67,
+        })
+
+        expect(result).toBe("Invalid mileage expense")
+      })
+
+      describe("schema validation", () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const getSchema = () => (tools.get("create_mileage_expense") as any).parameters
+
+        it("rejects unknown keys (strict)", () => {
+          const { success } = getSchema().safeParse({
+            account_id: "acc-1",
+            paid_through_account_id: "bank-1",
+            date: "2024-03-15",
+            mileage_type: "manual",
+            distance: 10,
+            mileage_unit: "mile",
+            mileage_rate: 0.5,
+            amount: 100,
+          })
+          expect(success).toBe(false)
+        })
+
+        it("requires distance, mileage_unit, and mileage_rate for manual mileage", () => {
+          const result = getSchema().safeParse({
+            account_id: "acc-1",
+            paid_through_account_id: "bank-1",
+            date: "2024-03-15",
+            mileage_type: "manual",
+          })
+          expect(result.success).toBe(false)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const messages = result.error.issues.map((i: any) => i.message).join(" ")
+          expect(messages).toContain("distance is required")
+          expect(messages).toContain("mileage_unit is required")
+          expect(messages).toContain("mileage_rate is required")
+        })
+
+        it("requires start_reading, end_reading, and mileage_rate for odometer mileage", () => {
+          const result = getSchema().safeParse({
+            account_id: "acc-1",
+            paid_through_account_id: "bank-1",
+            date: "2024-03-15",
+            mileage_type: "odometer",
+          })
+          expect(result.success).toBe(false)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const messages = result.error.issues.map((i: any) => i.message).join(" ")
+          expect(messages).toContain("start_reading is required")
+          expect(messages).toContain("end_reading is required")
+          expect(messages).toContain("mileage_rate is required")
+        })
+
+        it("rejects end_reading <= start_reading for odometer mileage", () => {
+          const result = getSchema().safeParse({
+            account_id: "acc-1",
+            paid_through_account_id: "bank-1",
+            date: "2024-03-15",
+            mileage_type: "odometer",
+            start_reading: 10000,
+            end_reading: 10000,
+            mileage_rate: 0.67,
+          })
+          expect(result.success).toBe(false)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const messages = result.error.issues.map((i: any) => i.message).join(" ")
+          expect(messages).toContain("end_reading must be greater than start_reading")
+        })
+      })
+    })
+
+    describe("update_expense", () => {
+      it("updates a regular expense successfully", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: true,
+          data: {
+            expense: {
+              expense_id: "exp-123",
+              date: "2024-03-15",
+              amount: 200.0,
+              currency_code: "USD",
+            },
+          },
+        })
+
+        const tool = tools.get("update_expense")!
+        const result = await tool.execute({
+          expense_id: "exp-123",
+          amount: 200.0,
+        })
+
+        expect(result).toContain("Expense Updated Successfully")
+        expect(result).toContain("exp-123")
+        expect(result).toContain("200")
+      })
+
+      it("rejects empty update payload", async () => {
+        const tool = tools.get("update_expense")!
+        const result = await tool.execute({
+          expense_id: "exp-123",
+        })
+
+        expect(result).toBe("**Validation Error**: Provide at least one expense field to update.")
+        expect(mockZohoPut).not.toHaveBeenCalled()
+      })
+
+      it("forwards explicit empty strings so text fields can be cleared", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: true,
+          data: {
+            expense: {
+              expense_id: "exp-123",
+              date: "2024-03-15",
+              amount: 200.0,
+              currency_code: "USD",
+            },
+          },
+        })
+
+        const tool = tools.get("update_expense")!
+        await tool.execute({
+          expense_id: "exp-123",
+          description: "",
+          reference_number: "",
+        })
+
+        expect(mockZohoPut).toHaveBeenCalledWith(
+          "/expenses/exp-123",
+          undefined,
+          expect.objectContaining({
+            description: "",
+            reference_number: "",
+          })
+        )
+      })
+
+      it("returns API errors when update fails", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: false,
+          errorMessage: "Expense not found",
+        })
+
+        const tool = tools.get("update_expense")!
+        const result = await tool.execute({
+          expense_id: "exp-999",
+          amount: 100,
+        })
+
+        expect(result).toBe("Expense not found")
+      })
+
+      describe("schema validation", () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const getSchema = () => (tools.get("update_expense") as any).parameters
+
+        it("rejects unknown keys (strict)", () => {
+          const { success } = getSchema().safeParse({
+            expense_id: "exp-1",
+            amount: 100,
+            unknown_key: true,
+          })
+          expect(success).toBe(false)
+        })
+
+        it("rejects mileage fields on the regular expense update tool", () => {
+          const { success } = getSchema().safeParse({
+            expense_id: "exp-1",
+            mileage_type: "manual",
+          })
+          expect(success).toBe(false)
+        })
+      })
+    })
+
+    describe("update_mileage_expense", () => {
+      it("updates a mileage expense successfully", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: true,
+          data: {
+            expense: {
+              expense_id: "exp-789",
+              date: "2024-03-15",
+              amount: 42.0,
+              currency_code: "USD",
+              distance: 60,
+              mileage_unit: "mile",
+            },
+          },
+        })
+
+        const tool = tools.get("update_mileage_expense")!
+        const result = await tool.execute({
+          expense_id: "exp-789",
+          mileage_type: "manual",
+          distance: 60,
+          mileage_unit: "mile",
+          mileage_rate: 0.7,
+        })
+
+        expect(result).toContain("Mileage Expense Updated Successfully")
+        expect(result).toContain("exp-789")
+        expect(result).toContain("Distance")
+        expect(result).toContain("60")
+      })
+
+      it("returns API errors when mileage update fails", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: false,
+          errorMessage: "Mileage expense not found",
+        })
+
+        const tool = tools.get("update_mileage_expense")!
+        const result = await tool.execute({
+          expense_id: "exp-789",
+          mileage_type: "manual",
+          distance: 60,
+          mileage_unit: "mile",
+          mileage_rate: 0.7,
+        })
+
+        expect(result).toBe("Mileage expense not found")
+      })
+
+      describe("schema validation", () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const getSchema = () => (tools.get("update_mileage_expense") as any).parameters
+
+        it("rejects unknown keys (strict)", () => {
+          const { success } = getSchema().safeParse({
+            expense_id: "exp-1",
+            mileage_type: "manual",
+            distance: 10,
+            mileage_unit: "mile",
+            mileage_rate: 0.5,
+            amount: 100,
+          })
+          expect(success).toBe(false)
+        })
+
+        it("requires distance, mileage_unit, and mileage_rate for manual mileage update", () => {
+          const result = getSchema().safeParse({
+            expense_id: "exp-1",
+            mileage_type: "manual",
+          })
+          expect(result.success).toBe(false)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const messages = result.error.issues.map((i: any) => i.message).join(" ")
+          expect(messages).toContain("distance is required")
+          expect(messages).toContain("mileage_unit is required")
+          expect(messages).toContain("mileage_rate is required")
+        })
+
+        it("requires start_reading, end_reading, and mileage_rate for odometer mileage update", () => {
+          const result = getSchema().safeParse({
+            expense_id: "exp-1",
+            mileage_type: "odometer",
+          })
+          expect(result.success).toBe(false)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const messages = result.error.issues.map((i: any) => i.message).join(" ")
+          expect(messages).toContain("start_reading is required")
+          expect(messages).toContain("end_reading is required")
+          expect(messages).toContain("mileage_rate is required")
+        })
+
+        it("rejects end_reading <= start_reading for odometer mileage update", () => {
+          const result = getSchema().safeParse({
+            expense_id: "exp-1",
+            mileage_type: "odometer",
+            start_reading: 5000,
+            end_reading: 4999,
+            mileage_rate: 0.67,
+          })
+          expect(result.success).toBe(false)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const messages = result.error.issues.map((i: any) => i.message).join(" ")
+          expect(messages).toContain("end_reading must be greater than start_reading")
+        })
+      })
+    })
+
+    describe("delete_expense", () => {
+      it("deletes an expense successfully", async () => {
+        mockZohoDelete.mockResolvedValue({
+          ok: true,
+          data: {},
+        })
+
+        const tool = tools.get("delete_expense")!
+        const result = await tool.execute({
+          expense_id: "exp-123",
+        })
+
+        expect(result).toContain("Expense Deleted Successfully")
+        expect(result).toContain("exp-123")
+      })
+
+      it("returns API errors when delete fails", async () => {
+        mockZohoDelete.mockResolvedValue({
+          ok: false,
+          errorMessage: "Expense cannot be deleted",
+        })
+
+        const tool = tools.get("delete_expense")!
+        const result = await tool.execute({
+          expense_id: "exp-123",
+        })
+
+        expect(result).toBe("Expense cannot be deleted")
+      })
+
+      describe("schema validation", () => {
+        it("rejects unknown keys (strict)", () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const schema = (tools.get("delete_expense") as any).parameters
+          const { success } = schema.safeParse({
+            expense_id: "exp-1",
+            unknown_field: true,
+          })
+          expect(success).toBe(false)
+        })
+      })
+    })
+  })
+
+  describe("Invoice Tools", () => {
+    beforeEach(() => {
+      registerInvoiceTools(server)
+    })
+
+    describe("create_invoice", () => {
+      it("creates an invoice successfully", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: true,
+          data: {
+            invoice: {
+              invoice_id: "inv-123",
+              invoice_number: "INV-001",
+              customer_id: "cust-1",
+              customer_name: "Test Customer",
+              date: "2024-03-15",
+              due_date: "2024-04-14",
+              total: 500.0,
+              currency_code: "USD",
+              status: "draft",
+            },
+          },
+        })
+
+        const tool = tools.get("create_invoice")!
+        const result = await tool.execute({
+          customer_id: "cust-1",
+          date: "2024-03-15",
+          due_date: "2024-04-14",
+          is_draft: true,
+          line_items: [{ name: "Consulting", rate: 500, quantity: 1 }],
+        })
+
+        expect(result).toContain("Invoice Created Successfully")
+        expect(result).toContain("inv-123")
+        expect(result).toContain("INV-001")
+        expect(result).toContain("Test Customer")
+        expect(result).toContain("500")
+      })
+
+      it("returns API errors when creation fails", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: false,
+          errorMessage: "Customer not found",
+        })
+
+        const tool = tools.get("create_invoice")!
+        const result = await tool.execute({
+          customer_id: "cust-999",
+          date: "2024-03-15",
+          line_items: [{ name: "Service", rate: 100, quantity: 1 }],
+        })
+
+        expect(result).toBe("Customer not found")
+      })
+
+      describe("schema validation", () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const getSchema = () => (tools.get("create_invoice") as any).parameters
+
+        it("rejects unknown keys in invoice (strict)", () => {
+          const { success } = getSchema().safeParse({
+            customer_id: "cust-1",
+            date: "2024-03-15",
+            line_items: [{ item_id: "item-1", name: "Service", rate: 100 }],
+            unknown_field: true,
+          })
+          expect(success).toBe(false)
+        })
+
+        it("allows ad-hoc line items identified by name", () => {
+          const result = getSchema().safeParse({
+            customer_id: "cust-1",
+            date: "2024-03-15",
+            line_items: [{ name: "Service", rate: 100, quantity: 1 }],
+          })
+          expect(result.success).toBe(true)
+        })
+
+        it("rejects line items without item_id or name", () => {
+          const result = getSchema().safeParse({
+            customer_id: "cust-1",
+            date: "2024-03-15",
+            line_items: [{ rate: 100, quantity: 1 }],
+          })
+          expect(result.success).toBe(false)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const messages = result.error.issues.map((i: any) => i.message).join(" ")
+          expect(messages).toContain("Either item_id or name is required")
+        })
+
+        it("rejects line item names longer than 100 characters", () => {
+          const result = getSchema().safeParse({
+            customer_id: "cust-1",
+            date: "2024-03-15",
+            line_items: [{ item_id: "item-1", name: "x".repeat(101), rate: 100, quantity: 1 }],
+          })
+          expect(result.success).toBe(false)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const paths = result.error.issues.map((i: any) => i.path.join("."))
+          expect(paths).toContain("line_items.0.name")
+        })
+
+        it("rejects payment_terms over 100 days", () => {
+          const result = getSchema().safeParse({
+            customer_id: "cust-1",
+            date: "2024-03-15",
+            payment_terms: 101,
+            line_items: [{ item_id: "item-1", rate: 100, quantity: 1 }],
+          })
+          expect(result.success).toBe(false)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const paths = result.error.issues.map((i: any) => i.path.join("."))
+          expect(paths).toContain("payment_terms")
+        })
+
+        it("rejects unknown keys in line items (strict)", () => {
+          const { success } = getSchema().safeParse({
+            customer_id: "cust-1",
+            date: "2024-03-15",
+            line_items: [{ item_id: "item-1", name: "Service", rate: 100, bad_key: true }],
+          })
+          expect(success).toBe(false)
+        })
       })
     })
   })

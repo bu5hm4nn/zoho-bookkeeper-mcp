@@ -4,9 +4,29 @@
 
 import { z } from "zod"
 import type { FastMCP } from "fastmcp"
-import { zohoGet, zohoUploadAttachment, zohoDeleteAttachment } from "../api/client.js"
+import { zohoGet, zohoPost, zohoUploadAttachment, zohoDeleteAttachment } from "../api/client.js"
 import type { Invoice, Attachment } from "../api/types.js"
-import { optionalOrganizationIdSchema } from "../utils/validation.js"
+import {
+  entityIdSchema,
+  dateSchema,
+  optionalDateSchema,
+  optionalOrganizationIdSchema,
+} from "../utils/validation.js"
+
+// Zod schema for invoice line items
+const invoiceLineItemSchema = z
+  .object({
+    item_id: entityIdSchema.optional().describe("Item ID from Zoho Books items catalog"),
+    name: z.string().max(100).optional().describe("Item name (required for ad-hoc line items)"),
+    description: z.string().max(2000).optional().describe("Description for this line item"),
+    quantity: z.number().positive().default(1).describe("Quantity (default 1)"),
+    rate: z.number().positive().describe("Unit price / rate"),
+    tax_id: entityIdSchema.optional().describe("Tax ID if applicable"),
+  })
+  .strict()
+  .refine((item) => item.item_id || item.name, {
+    message: "Either item_id or name is required for each line item",
+  })
 
 /**
  * Register invoice tools on the server
@@ -136,6 +156,83 @@ Returns full invoice details including line items and customer info.`,
       }
 
       return details
+    },
+  })
+
+  // Create Invoice
+  server.addTool({
+    name: "create_invoice",
+    description: `Create a new customer invoice (accounts receivable).
+Use list_contacts to find customer_id values.
+Use item_id for catalog items, or provide name and rate for ad-hoc line items.
+Set is_draft=true to save without sending.`,
+    parameters: z
+      .object({
+        organization_id: optionalOrganizationIdSchema.describe(
+          "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+        ),
+        customer_id: entityIdSchema.describe("Customer ID"),
+        date: dateSchema.describe("Invoice date (YYYY-MM-DD)"),
+        due_date: optionalDateSchema.describe("Payment due date (YYYY-MM-DD)"),
+        payment_terms: z
+          .number()
+          .int()
+          .min(0)
+          .max(100)
+          .optional()
+          .describe("Payment terms in days (e.g., 30 for Net 30, max 100)"),
+        reference_number: z.string().max(100).optional().describe("Reference number"),
+        notes: z.string().max(2000).optional().describe("Customer notes"),
+        is_draft: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe("Save as draft without sending (default false)"),
+        line_items: z.array(invoiceLineItemSchema).min(1).max(50).describe("Array of line items"),
+      })
+      .strict(),
+    annotations: {
+      title: "Create Invoice",
+      readOnlyHint: false,
+      openWorldHint: true,
+    },
+    execute: async (args) => {
+      const payload: Record<string, unknown> = {
+        customer_id: args.customer_id,
+        date: args.date,
+        line_items: args.line_items,
+      }
+
+      if (args.due_date) payload.due_date = args.due_date
+      if (args.payment_terms !== undefined) payload.payment_terms = args.payment_terms
+      if (args.reference_number) payload.reference_number = args.reference_number
+      if (args.notes) payload.notes = args.notes
+
+      const endpoint = args.is_draft ? "/invoices?status=draft" : "/invoices"
+
+      const result = await zohoPost<{ invoice: Invoice }>(endpoint, args.organization_id, payload)
+
+      if (!result.ok) {
+        return result.errorMessage || "Failed to create invoice"
+      }
+
+      const invoice = result.data?.invoice
+
+      if (!invoice) {
+        return "Invoice created but no details returned"
+      }
+
+      return `**Invoice Created Successfully**
+
+- **Invoice ID**: \`${invoice.invoice_id}\`
+- **Invoice Number**: ${invoice.invoice_number}
+- **Customer**: ${invoice.customer_name || invoice.customer_id}
+- **Date**: ${invoice.date}
+- **Due Date**: ${invoice.due_date || "N/A"}
+- **Total**: ${invoice.currency_code || ""} ${invoice.total}
+- **Status**: ${invoice.status || "N/A"}
+
+Use this invoice_id to add attachments.`
     },
   })
 

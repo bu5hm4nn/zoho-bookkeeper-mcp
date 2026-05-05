@@ -4,7 +4,14 @@
 
 import { z } from "zod"
 import type { FastMCP } from "fastmcp"
-import { zohoGet, zohoPost, zohoUploadAttachment, zohoDeleteAttachment } from "../api/client.js"
+import {
+  zohoGet,
+  zohoPost,
+  zohoPut,
+  zohoDelete,
+  zohoUploadAttachment,
+  zohoDeleteAttachment,
+} from "../api/client.js"
 import type { Expense, Attachment } from "../api/types.js"
 import {
   moneySchema,
@@ -13,6 +20,73 @@ import {
   optionalDateSchema,
   optionalOrganizationIdSchema,
 } from "../utils/validation.js"
+
+const mileageTypeSchema = z.enum(["manual", "odometer"])
+const mileageUnitSchema = z.enum(["km", "mile"])
+
+type MileageInput = {
+  mileage_type: "manual" | "odometer"
+  distance?: number
+  mileage_unit?: "km" | "mile"
+  mileage_rate?: number
+  start_reading?: number
+  end_reading?: number
+}
+
+function validateMileageInput(args: MileageInput, ctx: z.RefinementCtx): void {
+  if (args.mileage_type === "manual") {
+    if (args.distance === undefined)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "distance is required when mileage_type is 'manual'",
+        path: ["distance"],
+      })
+    if (!args.mileage_unit)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "mileage_unit is required when mileage_type is 'manual'",
+        path: ["mileage_unit"],
+      })
+    if (args.mileage_rate === undefined)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "mileage_rate is required when mileage_type is 'manual'",
+        path: ["mileage_rate"],
+      })
+  }
+
+  if (args.mileage_type === "odometer") {
+    if (args.start_reading === undefined)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "start_reading is required when mileage_type is 'odometer'",
+        path: ["start_reading"],
+      })
+    if (args.end_reading === undefined)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "end_reading is required when mileage_type is 'odometer'",
+        path: ["end_reading"],
+      })
+    if (args.mileage_rate === undefined)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "mileage_rate is required when mileage_type is 'odometer'",
+        path: ["mileage_rate"],
+      })
+    if (
+      args.start_reading !== undefined &&
+      args.end_reading !== undefined &&
+      args.end_reading <= args.start_reading
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "end_reading must be greater than start_reading",
+        path: ["end_reading"],
+      })
+    }
+  }
+}
 
 /**
  * Register expense tools on the server
@@ -138,25 +212,27 @@ Returns full expense details including account, vendor, and billable status.`,
   // Create Expense
   server.addTool({
     name: "create_expense",
-    description: `Create a new expense record.
-Requires account_id (expense account) and paid_through_account_id (payment account).
-Use list_accounts to find valid account IDs.`,
-    parameters: z.object({
-      organization_id: optionalOrganizationIdSchema.describe(
-        "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
-      ),
-      account_id: entityIdSchema.describe("Expense account ID"),
-      paid_through_account_id: entityIdSchema.describe(
-        "Payment account ID (bank/cash/credit card)"
-      ),
-      date: dateSchema.describe("Expense date (YYYY-MM-DD)"),
-      amount: moneySchema.describe("Expense amount (max 999,999,999.99, 2 decimal places)"),
-      description: z.string().max(500).optional().describe("Description of the expense"),
-      reference_number: z.string().max(100).optional().describe("Reference number"),
-      customer_id: entityIdSchema.optional().describe("Customer ID if billable"),
-      vendor_id: entityIdSchema.optional().describe("Vendor ID"),
-      is_billable: z.boolean().optional().describe("Whether expense is billable to a customer"),
-    }),
+    description: `Create a regular (non-mileage) expense record.
+Requires account_id (expense account), paid_through_account_id (payment account), and amount.
+Use create_mileage_expense for mileage reimbursement workflows.`,
+    parameters: z
+      .object({
+        organization_id: optionalOrganizationIdSchema.describe(
+          "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+        ),
+        account_id: entityIdSchema.describe("Expense account ID"),
+        paid_through_account_id: entityIdSchema.describe(
+          "Payment account ID (bank/cash/credit card)"
+        ),
+        date: dateSchema.describe("Expense date (YYYY-MM-DD)"),
+        amount: moneySchema.describe("Expense amount"),
+        description: z.string().max(500).optional().describe("Description of the expense"),
+        reference_number: z.string().max(100).optional().describe("Reference number"),
+        customer_id: entityIdSchema.optional().describe("Customer ID if billable"),
+        vendor_id: entityIdSchema.optional().describe("Vendor ID"),
+        is_billable: z.boolean().optional().describe("Whether expense is billable to a customer"),
+      })
+      .strict(),
     annotations: {
       title: "Create Expense",
       readOnlyHint: false,
@@ -199,6 +275,307 @@ Use list_accounts to find valid account IDs.`,
 - **Amount**: ${expense.currency_code || ""} ${expense.amount}
 
 Use this expense_id to add receipts.`
+    },
+  })
+
+  // Create Mileage Expense
+  server.addTool({
+    name: "create_mileage_expense",
+    description: `Create a mileage expense record.
+Requires account_id, paid_through_account_id, date, mileage_type, and the complete mileage field set for that type.
+Use this for mileage reimbursement workflows where Zoho auto-calculates the amount.`,
+    parameters: z
+      .object({
+        organization_id: optionalOrganizationIdSchema.describe(
+          "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+        ),
+        account_id: entityIdSchema.describe("Expense account ID"),
+        paid_through_account_id: entityIdSchema.describe(
+          "Payment account ID (bank/cash/credit card)"
+        ),
+        date: dateSchema.describe("Expense date (YYYY-MM-DD)"),
+        description: z.string().max(500).optional().describe("Description of the expense"),
+        reference_number: z.string().max(100).optional().describe("Reference number"),
+        customer_id: entityIdSchema.optional().describe("Customer ID if billable"),
+        vendor_id: entityIdSchema.optional().describe("Vendor ID"),
+        is_billable: z.boolean().optional().describe("Whether expense is billable to a customer"),
+        mileage_type: mileageTypeSchema.describe(
+          "Mileage type: 'manual' (enter distance) or 'odometer' (enter readings)"
+        ),
+        distance: z
+          .number()
+          .positive()
+          .optional()
+          .describe("Distance travelled (required when mileage_type is 'manual')"),
+        mileage_unit: mileageUnitSchema.optional().describe("Unit of distance: 'km' or 'mile'"),
+        mileage_rate: z.number().positive().optional().describe("Rate per unit distance"),
+        start_reading: z
+          .number()
+          .nonnegative()
+          .optional()
+          .describe("Odometer start reading (required when mileage_type is 'odometer')"),
+        end_reading: z
+          .number()
+          .positive()
+          .optional()
+          .describe("Odometer end reading (required when mileage_type is 'odometer')"),
+      })
+      .strict()
+      .superRefine(validateMileageInput),
+    annotations: {
+      title: "Create Mileage Expense",
+      readOnlyHint: false,
+      openWorldHint: true,
+    },
+    execute: async (args) => {
+      const payload: Record<string, unknown> = {
+        account_id: args.account_id,
+        paid_through_account_id: args.paid_through_account_id,
+        date: args.date,
+        mileage_type: args.mileage_type,
+      }
+
+      if (args.description) payload.description = args.description
+      if (args.reference_number) payload.reference_number = args.reference_number
+      if (args.customer_id) payload.customer_id = args.customer_id
+      if (args.vendor_id) payload.vendor_id = args.vendor_id
+      if (args.is_billable !== undefined) payload.is_billable = args.is_billable
+      if (args.distance !== undefined) payload.distance = args.distance
+      if (args.mileage_unit) payload.mileage_unit = args.mileage_unit
+      if (args.mileage_rate !== undefined) payload.mileage_rate = args.mileage_rate
+      if (args.start_reading !== undefined) payload.start_reading = args.start_reading
+      if (args.end_reading !== undefined) payload.end_reading = args.end_reading
+
+      const result = await zohoPost<{ expense: Expense }>(
+        "/expenses",
+        args.organization_id,
+        payload
+      )
+
+      if (!result.ok) {
+        return result.errorMessage || "Failed to create mileage expense"
+      }
+
+      const expense = result.data?.expense
+
+      if (!expense) {
+        return "Mileage expense created but no details returned"
+      }
+
+      const mileageInfo = expense.distance
+        ? `\n- **Distance**: ${expense.distance} ${expense.mileage_unit || ""}`
+        : ""
+
+      return `**Mileage Expense Created Successfully**
+
+- **Expense ID**: \`${expense.expense_id}\`
+- **Date**: ${expense.date}
+- **Amount**: ${expense.currency_code || ""} ${expense.amount}${mileageInfo}
+
+Use this expense_id to add receipts.`
+    },
+  })
+
+  // Update Expense
+  server.addTool({
+    name: "update_expense",
+    description: `Update a regular (non-mileage) expense record.
+Only provide non-mileage fields you want to change — unspecified fields remain unchanged.
+Use update_mileage_expense when changing mileage_type, distance, rate, or odometer readings.`,
+    parameters: z
+      .object({
+        organization_id: optionalOrganizationIdSchema.describe(
+          "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+        ),
+        expense_id: entityIdSchema.describe("Expense ID to update"),
+        account_id: entityIdSchema.optional().describe("Expense account ID"),
+        paid_through_account_id: entityIdSchema
+          .optional()
+          .describe("Payment account ID (bank/cash/credit card)"),
+        date: dateSchema.optional().describe("Expense date (YYYY-MM-DD)"),
+        amount: moneySchema.optional().describe("Expense amount"),
+        description: z.string().max(500).optional().describe("Description of the expense"),
+        reference_number: z.string().max(100).optional().describe("Reference number"),
+        customer_id: entityIdSchema.optional().describe("Customer ID if billable"),
+        vendor_id: entityIdSchema.optional().describe("Vendor ID"),
+        is_billable: z.boolean().optional().describe("Whether expense is billable to a customer"),
+      })
+      .strict(),
+    annotations: {
+      title: "Update Expense",
+      readOnlyHint: false,
+      openWorldHint: true,
+    },
+    execute: async (args) => {
+      const payload: Record<string, unknown> = {}
+
+      if (args.account_id) payload.account_id = args.account_id
+      if (args.paid_through_account_id)
+        payload.paid_through_account_id = args.paid_through_account_id
+      if (args.date) payload.date = args.date
+      if (args.amount !== undefined) payload.amount = args.amount
+      if (args.description !== undefined) payload.description = args.description
+      if (args.reference_number !== undefined) payload.reference_number = args.reference_number
+      if (args.customer_id) payload.customer_id = args.customer_id
+      if (args.vendor_id) payload.vendor_id = args.vendor_id
+      if (args.is_billable !== undefined) payload.is_billable = args.is_billable
+
+      if (Object.keys(payload).length === 0) {
+        return "**Validation Error**: Provide at least one expense field to update."
+      }
+
+      const result = await zohoPut<{ expense: Expense }>(
+        `/expenses/${args.expense_id}`,
+        args.organization_id,
+        payload
+      )
+
+      if (!result.ok) {
+        return result.errorMessage || "Failed to update expense"
+      }
+
+      const expense = result.data?.expense
+
+      if (!expense) {
+        return "Expense updated but no details returned"
+      }
+
+      return `**Expense Updated Successfully**
+
+- **Expense ID**: \`${expense.expense_id}\`
+- **Date**: ${expense.date}
+- **Amount**: ${expense.currency_code || ""} ${expense.amount}`
+    },
+  })
+
+  // Update Mileage Expense
+  server.addTool({
+    name: "update_mileage_expense",
+    description: `Update a mileage expense record.
+Mileage updates require the complete field set for the selected mileage_type: manual needs distance + mileage_unit + mileage_rate; odometer needs start_reading + end_reading + mileage_rate.
+Use update_expense for non-mileage field changes.`,
+    parameters: z
+      .object({
+        organization_id: optionalOrganizationIdSchema.describe(
+          "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+        ),
+        expense_id: entityIdSchema.describe("Expense ID to update"),
+        account_id: entityIdSchema.optional().describe("Expense account ID"),
+        paid_through_account_id: entityIdSchema
+          .optional()
+          .describe("Payment account ID (bank/cash/credit card)"),
+        date: dateSchema.optional().describe("Expense date (YYYY-MM-DD)"),
+        description: z.string().max(500).optional().describe("Description of the expense"),
+        reference_number: z.string().max(100).optional().describe("Reference number"),
+        customer_id: entityIdSchema.optional().describe("Customer ID if billable"),
+        vendor_id: entityIdSchema.optional().describe("Vendor ID"),
+        is_billable: z.boolean().optional().describe("Whether expense is billable to a customer"),
+        mileage_type: mileageTypeSchema.describe(
+          "Mileage type: 'manual' (enter distance) or 'odometer' (enter readings)"
+        ),
+        distance: z
+          .number()
+          .positive()
+          .optional()
+          .describe("Distance travelled (required when mileage_type is 'manual')"),
+        mileage_unit: mileageUnitSchema.optional().describe("Unit of distance: 'km' or 'mile'"),
+        mileage_rate: z.number().positive().optional().describe("Rate per unit distance"),
+        start_reading: z
+          .number()
+          .nonnegative()
+          .optional()
+          .describe("Odometer start reading (required when mileage_type is 'odometer')"),
+        end_reading: z
+          .number()
+          .positive()
+          .optional()
+          .describe("Odometer end reading (required when mileage_type is 'odometer')"),
+      })
+      .strict()
+      .superRefine(validateMileageInput),
+    annotations: {
+      title: "Update Mileage Expense",
+      readOnlyHint: false,
+      openWorldHint: true,
+    },
+    execute: async (args) => {
+      const payload: Record<string, unknown> = {
+        mileage_type: args.mileage_type,
+      }
+
+      if (args.account_id) payload.account_id = args.account_id
+      if (args.paid_through_account_id)
+        payload.paid_through_account_id = args.paid_through_account_id
+      if (args.date) payload.date = args.date
+      if (args.description !== undefined) payload.description = args.description
+      if (args.reference_number !== undefined) payload.reference_number = args.reference_number
+      if (args.customer_id) payload.customer_id = args.customer_id
+      if (args.vendor_id) payload.vendor_id = args.vendor_id
+      if (args.is_billable !== undefined) payload.is_billable = args.is_billable
+      if (args.distance !== undefined) payload.distance = args.distance
+      if (args.mileage_unit) payload.mileage_unit = args.mileage_unit
+      if (args.mileage_rate !== undefined) payload.mileage_rate = args.mileage_rate
+      if (args.start_reading !== undefined) payload.start_reading = args.start_reading
+      if (args.end_reading !== undefined) payload.end_reading = args.end_reading
+
+      const result = await zohoPut<{ expense: Expense }>(
+        `/expenses/${args.expense_id}`,
+        args.organization_id,
+        payload
+      )
+
+      if (!result.ok) {
+        return result.errorMessage || "Failed to update mileage expense"
+      }
+
+      const expense = result.data?.expense
+
+      if (!expense) {
+        return "Mileage expense updated but no details returned"
+      }
+
+      const mileageInfo = expense.distance
+        ? `\n- **Distance**: ${expense.distance} ${expense.mileage_unit || ""}`
+        : ""
+
+      return `**Mileage Expense Updated Successfully**
+
+- **Expense ID**: \`${expense.expense_id}\`
+- **Date**: ${expense.date}
+- **Amount**: ${expense.currency_code || ""} ${expense.amount}${mileageInfo}`
+    },
+  })
+
+  // Delete Expense
+  server.addTool({
+    name: "delete_expense",
+    description: `Delete an expense record. This action cannot be undone.`,
+    parameters: z
+      .object({
+        organization_id: optionalOrganizationIdSchema.describe(
+          "Zoho org ID (uses ZOHO_ORGANIZATION_ID env var if not provided)"
+        ),
+        expense_id: entityIdSchema.describe("Expense ID to delete"),
+      })
+      .strict(),
+    annotations: {
+      title: "Delete Expense",
+      readOnlyHint: false,
+      openWorldHint: true,
+    },
+    execute: async (args) => {
+      const result = await zohoDelete<Record<string, unknown>>(
+        `/expenses/${args.expense_id}`,
+        args.organization_id
+      )
+
+      if (!result.ok) {
+        return result.errorMessage || "Failed to delete expense"
+      }
+
+      return `**Expense Deleted Successfully**
+
+Expense \`${args.expense_id}\` has been deleted.`
     },
   })
 

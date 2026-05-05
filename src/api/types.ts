@@ -119,6 +119,12 @@ export interface Expense {
   vendor_id?: string
   vendor_name?: string
   status?: string
+  mileage_type?: string
+  distance?: number
+  mileage_unit?: string
+  mileage_rate?: number
+  start_reading?: number
+  end_reading?: number
   created_time?: string
   last_modified_time?: string
 }
@@ -127,12 +133,18 @@ export interface CreateExpenseRequest {
   account_id: string
   paid_through_account_id: string
   date: string
-  amount: number
+  amount?: number
   description?: string
   reference_number?: string
   customer_id?: string
   vendor_id?: string
   is_billable?: boolean
+  mileage_type?: string
+  distance?: number
+  mileage_unit?: string
+  mileage_rate?: number
+  start_reading?: number
+  end_reading?: number
 }
 
 // Bill
