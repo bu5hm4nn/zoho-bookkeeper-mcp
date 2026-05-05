@@ -1283,38 +1283,6 @@ describe("MCP Tools", () => {
         expect(result).toContain("150")
       })
 
-      it("creates a mileage expense successfully", async () => {
-        mockZohoPost.mockResolvedValue({
-          ok: true,
-          data: {
-            expense: {
-              expense_id: "exp-456",
-              date: "2024-03-15",
-              amount: 36.25,
-              currency_code: "USD",
-              distance: 50,
-              mileage_unit: "mile",
-            },
-          },
-        })
-
-        const tool = tools.get("create_expense")!
-        const result = await tool.execute({
-          account_id: "acc-1",
-          paid_through_account_id: "bank-1",
-          date: "2024-03-15",
-          mileage_type: "manual",
-          distance: 50,
-          mileage_unit: "mile",
-          mileage_rate: 0.725,
-        })
-
-        expect(result).toContain("Expense Created Successfully")
-        expect(result).toContain("exp-456")
-        expect(result).toContain("Distance")
-        expect(result).toContain("50")
-      })
-
       it("returns API errors when creation fails", async () => {
         mockZohoPost.mockResolvedValue({
           ok: false,
@@ -1347,7 +1315,7 @@ describe("MCP Tools", () => {
           expect(success).toBe(false)
         })
 
-        it("requires amount for non-mileage expense", () => {
+        it("requires amount for regular expense", () => {
           const result = getSchema().safeParse({
             account_id: "acc-1",
             paid_through_account_id: "bank-1",
@@ -1355,39 +1323,92 @@ describe("MCP Tools", () => {
           })
           expect(result.success).toBe(false)
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const messages = result.error.issues.map((i: any) => i.message).join(" ")
-          expect(messages).toContain("amount is required")
+          const paths = result.error.issues.map((i: any) => i.path.join("."))
+          expect(paths).toContain("amount")
         })
 
-        it("rejects mileage fields without mileage_type", () => {
-          const result = getSchema().safeParse({
+        it("rejects mileage fields on the regular expense tool", () => {
+          const { success } = getSchema().safeParse({
             account_id: "acc-1",
             paid_through_account_id: "bank-1",
             date: "2024-03-15",
             amount: 100,
-            distance: 50,
+            mileage_type: "manual",
           })
-          expect(result.success).toBe(false)
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const messages = result.error.issues.map((i: any) => i.message).join(" ")
-          expect(messages).toContain("mileage_type is required when providing mileage fields")
+          expect(success).toBe(false)
+        })
+      })
+    })
+
+    describe("create_mileage_expense", () => {
+      it("creates a mileage expense successfully", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: true,
+          data: {
+            expense: {
+              expense_id: "exp-456",
+              date: "2024-03-15",
+              amount: 36.25,
+              currency_code: "USD",
+              distance: 50,
+              mileage_unit: "mile",
+            },
+          },
         })
 
-        it("rejects amount when mileage_type is set", () => {
-          const result = getSchema().safeParse({
+        const tool = tools.get("create_mileage_expense")!
+        const result = await tool.execute({
+          account_id: "acc-1",
+          paid_through_account_id: "bank-1",
+          date: "2024-03-15",
+          mileage_type: "manual",
+          distance: 50,
+          mileage_unit: "mile",
+          mileage_rate: 0.725,
+        })
+
+        expect(result).toContain("Mileage Expense Created Successfully")
+        expect(result).toContain("exp-456")
+        expect(result).toContain("Distance")
+        expect(result).toContain("50")
+      })
+
+      it("returns API errors when mileage creation fails", async () => {
+        mockZohoPost.mockResolvedValue({
+          ok: false,
+          errorMessage: "Invalid mileage expense",
+        })
+
+        const tool = tools.get("create_mileage_expense")!
+        const result = await tool.execute({
+          account_id: "acc-1",
+          paid_through_account_id: "bank-1",
+          date: "2024-03-15",
+          mileage_type: "manual",
+          distance: 50,
+          mileage_unit: "mile",
+          mileage_rate: 0.67,
+        })
+
+        expect(result).toBe("Invalid mileage expense")
+      })
+
+      describe("schema validation", () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const getSchema = () => (tools.get("create_mileage_expense") as any).parameters
+
+        it("rejects unknown keys (strict)", () => {
+          const { success } = getSchema().safeParse({
             account_id: "acc-1",
             paid_through_account_id: "bank-1",
             date: "2024-03-15",
             mileage_type: "manual",
-            distance: 50,
+            distance: 10,
             mileage_unit: "mile",
-            mileage_rate: 0.67,
+            mileage_rate: 0.5,
             amount: 100,
           })
-          expect(result.success).toBe(false)
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const messages = result.error.issues.map((i: any) => i.message).join(" ")
-          expect(messages).toContain("Do not provide amount for mileage expenses")
+          expect(success).toBe(false)
         })
 
         it("requires distance, mileage_unit, and mileage_rate for manual mileage", () => {
@@ -1439,7 +1460,7 @@ describe("MCP Tools", () => {
     })
 
     describe("update_expense", () => {
-      it("updates an expense successfully", async () => {
+      it("updates a regular expense successfully", async () => {
         mockZohoPut.mockResolvedValue({
           ok: true,
           data: {
@@ -1531,30 +1552,79 @@ describe("MCP Tools", () => {
           expect(success).toBe(false)
         })
 
-        it("rejects mileage fields without mileage_type", () => {
-          const result = getSchema().safeParse({
-            expense_id: "exp-1",
-            distance: 50,
-          })
-          expect(result.success).toBe(false)
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const messages = result.error.issues.map((i: any) => i.message).join(" ")
-          expect(messages).toContain("mileage_type is required when providing mileage fields")
-        })
-
-        it("rejects amount when mileage_type is set", () => {
-          const result = getSchema().safeParse({
+        it("rejects mileage fields on the regular expense update tool", () => {
+          const { success } = getSchema().safeParse({
             expense_id: "exp-1",
             mileage_type: "manual",
-            distance: 50,
+          })
+          expect(success).toBe(false)
+        })
+      })
+    })
+
+    describe("update_mileage_expense", () => {
+      it("updates a mileage expense successfully", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: true,
+          data: {
+            expense: {
+              expense_id: "exp-789",
+              date: "2024-03-15",
+              amount: 42.0,
+              currency_code: "USD",
+              distance: 60,
+              mileage_unit: "mile",
+            },
+          },
+        })
+
+        const tool = tools.get("update_mileage_expense")!
+        const result = await tool.execute({
+          expense_id: "exp-789",
+          mileage_type: "manual",
+          distance: 60,
+          mileage_unit: "mile",
+          mileage_rate: 0.7,
+        })
+
+        expect(result).toContain("Mileage Expense Updated Successfully")
+        expect(result).toContain("exp-789")
+        expect(result).toContain("Distance")
+        expect(result).toContain("60")
+      })
+
+      it("returns API errors when mileage update fails", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: false,
+          errorMessage: "Mileage expense not found",
+        })
+
+        const tool = tools.get("update_mileage_expense")!
+        const result = await tool.execute({
+          expense_id: "exp-789",
+          mileage_type: "manual",
+          distance: 60,
+          mileage_unit: "mile",
+          mileage_rate: 0.7,
+        })
+
+        expect(result).toBe("Mileage expense not found")
+      })
+
+      describe("schema validation", () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const getSchema = () => (tools.get("update_mileage_expense") as any).parameters
+
+        it("rejects unknown keys (strict)", () => {
+          const { success } = getSchema().safeParse({
+            expense_id: "exp-1",
+            mileage_type: "manual",
+            distance: 10,
             mileage_unit: "mile",
-            mileage_rate: 0.67,
+            mileage_rate: 0.5,
             amount: 100,
           })
-          expect(result.success).toBe(false)
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const messages = result.error.issues.map((i: any) => i.message).join(" ")
-          expect(messages).toContain("Do not provide amount for mileage expenses")
+          expect(success).toBe(false)
         })
 
         it("requires distance, mileage_unit, and mileage_rate for manual mileage update", () => {

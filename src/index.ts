@@ -42,7 +42,8 @@ You do NOT need to call list_organizations first - just use the tools directly.
 - add_journal_attachment, get_journal_attachment, delete_journal_attachment
 
 ### Expenses
-- list_expenses, get_expense, create_expense, update_expense, delete_expense
+- list_expenses, get_expense, create_expense, create_mileage_expense
+- update_expense, update_mileage_expense, delete_expense
 - add_expense_receipt, get_expense_receipt, delete_expense_receipt
 
 ### Bills
