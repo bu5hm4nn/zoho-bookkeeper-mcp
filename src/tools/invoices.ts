@@ -175,9 +175,9 @@ Set is_draft=true to save without sending.`,
           .number()
           .int()
           .min(0)
-          .max(3650)
+          .max(100)
           .optional()
-          .describe("Payment terms in days (e.g., 30 for Net 30)"),
+          .describe("Payment terms in days (e.g., 30 for Net 30, max 100)"),
         reference_number: z.string().max(100).optional().describe("Reference number"),
         notes: z.string().max(2000).optional().describe("Customer notes"),
         is_draft: z

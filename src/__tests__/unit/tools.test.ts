@@ -1682,6 +1682,19 @@ describe("MCP Tools", () => {
           expect(paths).toContain("line_items.0.name")
         })
 
+        it("rejects payment_terms over 100 days", () => {
+          const result = getSchema().safeParse({
+            customer_id: "cust-1",
+            date: "2024-03-15",
+            payment_terms: 101,
+            line_items: [{ item_id: "item-1", rate: 100, quantity: 1 }],
+          })
+          expect(result.success).toBe(false)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const paths = result.error.issues.map((i: any) => i.path.join("."))
+          expect(paths).toContain("payment_terms")
+        })
+
         it("rejects unknown keys in line items (strict)", () => {
           const { success } = getSchema().safeParse({
             customer_id: "cust-1",
