@@ -477,8 +477,8 @@ Zoho will auto-calculate the amount from mileage fields.`,
         payload.paid_through_account_id = args.paid_through_account_id
       if (args.date) payload.date = args.date
       if (args.amount !== undefined) payload.amount = args.amount
-      if (args.description) payload.description = args.description
-      if (args.reference_number) payload.reference_number = args.reference_number
+      if (args.description !== undefined) payload.description = args.description
+      if (args.reference_number !== undefined) payload.reference_number = args.reference_number
       if (args.customer_id) payload.customer_id = args.customer_id
       if (args.vendor_id) payload.vendor_id = args.vendor_id
       if (args.is_billable !== undefined) payload.is_billable = args.is_billable

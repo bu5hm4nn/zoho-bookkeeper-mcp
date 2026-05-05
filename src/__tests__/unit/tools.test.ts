@@ -1473,6 +1473,36 @@ describe("MCP Tools", () => {
         expect(mockZohoPut).not.toHaveBeenCalled()
       })
 
+      it("forwards explicit empty strings so text fields can be cleared", async () => {
+        mockZohoPut.mockResolvedValue({
+          ok: true,
+          data: {
+            expense: {
+              expense_id: "exp-123",
+              date: "2024-03-15",
+              amount: 200.0,
+              currency_code: "USD",
+            },
+          },
+        })
+
+        const tool = tools.get("update_expense")!
+        await tool.execute({
+          expense_id: "exp-123",
+          description: "",
+          reference_number: "",
+        })
+
+        expect(mockZohoPut).toHaveBeenCalledWith(
+          "/expenses/exp-123",
+          undefined,
+          expect.objectContaining({
+            description: "",
+            reference_number: "",
+          })
+        )
+      })
+
       it("returns API errors when update fails", async () => {
         mockZohoPut.mockResolvedValue({
           ok: false,
