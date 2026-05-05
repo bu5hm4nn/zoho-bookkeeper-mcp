@@ -1670,6 +1670,18 @@ describe("MCP Tools", () => {
           expect(paths).toContain("line_items.0.item_id")
         })
 
+        it("rejects line item names longer than 100 characters", () => {
+          const result = getSchema().safeParse({
+            customer_id: "cust-1",
+            date: "2024-03-15",
+            line_items: [{ item_id: "item-1", name: "x".repeat(101), rate: 100, quantity: 1 }],
+          })
+          expect(result.success).toBe(false)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const paths = result.error.issues.map((i: any) => i.path.join("."))
+          expect(paths).toContain("line_items.0.name")
+        })
+
         it("rejects unknown keys in line items (strict)", () => {
           const { success } = getSchema().safeParse({
             customer_id: "cust-1",

@@ -17,7 +17,7 @@ import {
 const invoiceLineItemSchema = z
   .object({
     item_id: entityIdSchema.describe("Item ID from Zoho Books items catalog"),
-    name: z.string().max(200).optional().describe("Optional line-item name override"),
+    name: z.string().max(100).optional().describe("Optional line-item name override"),
     description: z.string().max(2000).optional().describe("Description for this line item"),
     quantity: z.number().positive().default(1).describe("Quantity (default 1)"),
     rate: z.number().positive().describe("Unit price / rate"),
