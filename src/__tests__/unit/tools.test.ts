@@ -1673,7 +1673,7 @@ describe("MCP Tools", () => {
           date: "2024-03-15",
           due_date: "2024-04-14",
           is_draft: true,
-          line_items: [{ item_id: "item-1", name: "Consulting", rate: 500, quantity: 1 }],
+          line_items: [{ name: "Consulting", rate: 500, quantity: 1 }],
         })
 
         expect(result).toContain("Invoice Created Successfully")
@@ -1693,7 +1693,7 @@ describe("MCP Tools", () => {
         const result = await tool.execute({
           customer_id: "cust-999",
           date: "2024-03-15",
-          line_items: [{ item_id: "item-1", name: "Service", rate: 100, quantity: 1 }],
+          line_items: [{ name: "Service", rate: 100, quantity: 1 }],
         })
 
         expect(result).toBe("Customer not found")
@@ -1713,16 +1713,25 @@ describe("MCP Tools", () => {
           expect(success).toBe(false)
         })
 
-        it("rejects line items without item_id", () => {
+        it("allows ad-hoc line items identified by name", () => {
           const result = getSchema().safeParse({
             customer_id: "cust-1",
             date: "2024-03-15",
             line_items: [{ name: "Service", rate: 100, quantity: 1 }],
           })
+          expect(result.success).toBe(true)
+        })
+
+        it("rejects line items without item_id or name", () => {
+          const result = getSchema().safeParse({
+            customer_id: "cust-1",
+            date: "2024-03-15",
+            line_items: [{ rate: 100, quantity: 1 }],
+          })
           expect(result.success).toBe(false)
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const paths = result.error.issues.map((i: any) => i.path.join("."))
-          expect(paths).toContain("line_items.0.item_id")
+          const messages = result.error.issues.map((i: any) => i.message).join(" ")
+          expect(messages).toContain("Either item_id or name is required")
         })
 
         it("rejects line item names longer than 100 characters", () => {

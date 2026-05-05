@@ -16,14 +16,17 @@ import {
 // Zod schema for invoice line items
 const invoiceLineItemSchema = z
   .object({
-    item_id: entityIdSchema.describe("Item ID from Zoho Books items catalog"),
-    name: z.string().max(100).optional().describe("Optional line-item name override"),
+    item_id: entityIdSchema.optional().describe("Item ID from Zoho Books items catalog"),
+    name: z.string().max(100).optional().describe("Item name (required for ad-hoc line items)"),
     description: z.string().max(2000).optional().describe("Description for this line item"),
     quantity: z.number().positive().default(1).describe("Quantity (default 1)"),
     rate: z.number().positive().describe("Unit price / rate"),
     tax_id: entityIdSchema.optional().describe("Tax ID if applicable"),
   })
   .strict()
+  .refine((item) => item.item_id || item.name, {
+    message: "Either item_id or name is required for each line item",
+  })
 
 /**
  * Register invoice tools on the server
@@ -161,7 +164,7 @@ Returns full invoice details including line items and customer info.`,
     name: "create_invoice",
     description: `Create a new customer invoice (accounts receivable).
 Use list_contacts to find customer_id values.
-Each line item must include item_id from the Zoho item catalog. You may optionally override the displayed name.
+Use item_id for catalog items, or provide name and rate for ad-hoc line items.
 Set is_draft=true to save without sending.`,
     parameters: z
       .object({
