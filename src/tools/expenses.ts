@@ -199,6 +199,21 @@ Zoho will auto-calculate the amount from mileage fields. Do NOT provide amount f
       })
       .strict()
       .superRefine((args, ctx) => {
+        const hasMileageFields =
+          args.distance !== undefined ||
+          args.mileage_unit !== undefined ||
+          args.mileage_rate !== undefined ||
+          args.start_reading !== undefined ||
+          args.end_reading !== undefined
+
+        if (!args.mileage_type && hasMileageFields) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "mileage_type is required when providing mileage fields",
+            path: ["mileage_type"],
+          })
+        }
+
         if (args.mileage_type === "manual") {
           if (args.distance === undefined)
             ctx.addIssue({
@@ -375,6 +390,21 @@ Zoho will auto-calculate the amount from mileage fields.`,
       })
       .strict()
       .superRefine((args, ctx) => {
+        const hasMileageFields =
+          args.distance !== undefined ||
+          args.mileage_unit !== undefined ||
+          args.mileage_rate !== undefined ||
+          args.start_reading !== undefined ||
+          args.end_reading !== undefined
+
+        if (!args.mileage_type && hasMileageFields) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "mileage_type is required when providing mileage fields",
+            path: ["mileage_type"],
+          })
+        }
+
         if (args.mileage_type === "manual") {
           if (args.distance === undefined)
             ctx.addIssue({

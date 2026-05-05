@@ -1359,6 +1359,20 @@ describe("MCP Tools", () => {
           expect(messages).toContain("amount is required")
         })
 
+        it("rejects mileage fields without mileage_type", () => {
+          const result = getSchema().safeParse({
+            account_id: "acc-1",
+            paid_through_account_id: "bank-1",
+            date: "2024-03-15",
+            amount: 100,
+            distance: 50,
+          })
+          expect(result.success).toBe(false)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const messages = result.error.issues.map((i: any) => i.message).join(" ")
+          expect(messages).toContain("mileage_type is required when providing mileage fields")
+        })
+
         it("rejects amount when mileage_type is set", () => {
           const result = getSchema().safeParse({
             account_id: "acc-1",
@@ -1485,6 +1499,17 @@ describe("MCP Tools", () => {
             unknown_key: true,
           })
           expect(success).toBe(false)
+        })
+
+        it("rejects mileage fields without mileage_type", () => {
+          const result = getSchema().safeParse({
+            expense_id: "exp-1",
+            distance: 50,
+          })
+          expect(result.success).toBe(false)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const messages = result.error.issues.map((i: any) => i.message).join(" ")
+          expect(messages).toContain("mileage_type is required when providing mileage fields")
         })
 
         it("rejects amount when mileage_type is set", () => {
