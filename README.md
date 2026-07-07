@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/bu5hm4nn-zoho-bookkeeper-mcp-badge.png)](https://mseep.ai/app/bu5hm4nn-zoho-bookkeeper-mcp)
+
 # Zoho Bookkeeper MCP Server
 
 A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for Zoho Books integration, designed for bookkeeping workflows with AI agents.
